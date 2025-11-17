@@ -1050,7 +1050,6 @@ class BasePlugin:
                     try:
                         zone_uuid_val = self.zones_cache.get(zone_id, {}).get('uuid')
                         new_entries = {
-                            'ame': f"{zone_name} Thermostat",
                             'nicknames': f"{zone_name} Thermostat",
                             'room': zone_name,
                             'actual_temp_idx': temp_idx,
