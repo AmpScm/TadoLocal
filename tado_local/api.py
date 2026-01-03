@@ -587,7 +587,13 @@ class TadoLocalAPI:
         battery_state = device_info.get('battery_state')
         battery_low = battery_state is not None and battery_state != 'NORMAL'
 
-        return {
+        # Get tracked_mode from zone if device belongs to one
+        zone_id = device_info.get('zone_id')
+        tracked_mode = None
+        if zone_id:
+            tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+
+        result = {
             'cur_temp_c': cur_temp_c,
             'cur_temp_f': self._celsius_to_fahrenheit(cur_temp_c) if cur_temp_c is not None else None,
             'hum_perc': state.get('humidity'),
@@ -598,6 +604,12 @@ class TadoLocalAPI:
             'valve_position': state.get('valve_position'),
             'battery_low': battery_low,
         }
+        
+        # Add tracked_mode if device belongs to a zone
+        if tracked_mode is not None:
+            result['tracked_mode'] = tracked_mode
+            
+        return result
 
     async def broadcast_state_change(self, device_id: int, zone_name: str):
         """
