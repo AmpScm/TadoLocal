@@ -71,6 +71,10 @@ class TadoLocalAPI:
         self.is_initializing = True  # Suppress change logging during init
         await self.refresh_accessories()
         await self.initialize_device_states()
+        
+        # Set all zones to Auto mode on startup
+        await self._set_all_zones_to_auto_mode()
+        
         self.is_initializing = False  # Re-enable change logging
         await self.setup_event_listeners()
         logger.info("Tado Local initialized successfully")
@@ -270,6 +274,40 @@ class TadoLocalAPI:
 
         logger.info(f"Device state initialization complete - baseline established for {len(self.device_to_characteristics)} devices")
 
+    async def _set_all_zones_to_auto_mode(self):
+        """Set all zones to Auto mode (tracked_mode=3) on startup."""
+        if not self.pairing:
+            logger.warning("No pairing available, skipping Auto mode initialization")
+            return
+
+        zones_set = 0
+        for zone_id, zone_info in self.state_manager.zone_cache.items():
+            try:
+                # Set tracked_mode to 3 (Auto) in database and cache
+                self.state_manager.set_zone_tracked_mode(zone_id, 3)
+                zone_name = zone_info.get('name', f'Zone {zone_id}')
+                
+                # Set HomeKit target_heating_cooling_state to 1 (HEAT) for zone leader
+                # Auto mode shows as HEAT to HomeKit
+                leader_device_id = zone_info.get('leader_device_id')
+                if leader_device_id:
+                    try:
+                        await self.set_device_characteristics(
+                            leader_device_id,
+                            {'target_heating_cooling_state': 1}
+                        )
+                        zones_set += 1
+                        logger.info(f"Zone {zone_id} ({zone_name}): Set to Auto mode on startup")
+                    except Exception as e:
+                        logger.warning(f"Zone {zone_id} ({zone_name}): Failed to set HomeKit state to HEAT: {e}")
+                else:
+                    logger.debug(f"Zone {zone_id} ({zone_name}): No leader device, tracked_mode set to Auto")
+                    zones_set += 1
+            except Exception as e:
+                logger.error(f"Zone {zone_id}: Failed to set to Auto mode: {e}")
+
+        if zones_set > 0:
+            logger.info(f"Set {zones_set} zone(s) to Auto mode on startup")
 
     async def setup_event_listeners(self):
         """Setup unified change detection with events + polling comparison."""
