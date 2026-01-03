@@ -169,7 +169,7 @@ def ensure_schema_and_migrate(db_path: str):
     # Supported schema version for this codebase. If the database reports a
     # higher user_version we should refuse to start to avoid silent data loss
     # or incompatible assumptions.
-    SUPPORTED_SCHEMA_VERSION = 3
+    SUPPORTED_SCHEMA_VERSION = 4
 
     # Open connection and check current schema version before applying changes
     conn = sqlite3.connect(db_path)
@@ -258,6 +258,68 @@ def ensure_schema_and_migrate(db_path: str):
 
             conn.execute("PRAGMA user_version = 3")
             current_version = 3
+            conn.commit()
+        except Exception:
+            # Rollback any partial changes on error
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+    else:
+        conn.close()
+
+    # Re-open connection for next migration check
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("PRAGMA user_version")
+    row = cursor.fetchone()
+    current_version = row[0] if row else 0
+
+    # Migration to version 4: add zone_schedules and app_config tables
+    if current_version < 4:
+        try:
+            # Use explicit transaction to ensure atomic migration
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # Create zone_schedules table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS zone_schedules (
+                        schedule_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        zone_id INTEGER NOT NULL,
+                        schedule_type INTEGER NOT NULL CHECK (schedule_type IN (1, 2, 3)),
+                        day_of_week INTEGER CHECK (day_of_week IS NULL OR (day_of_week >= 0 AND day_of_week <= 6)),
+                        day_type TEXT CHECK (day_type IS NULL OR day_type IN ('weekday', 'weekend')),
+                        time TEXT NOT NULL CHECK (time GLOB '[0-2][0-9]:[0-5][05]'),
+                        temperature REAL NOT NULL,
+                        enabled BOOLEAN DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        FOREIGN KEY (zone_id) REFERENCES zones(zone_id) ON DELETE CASCADE,
+                        UNIQUE(zone_id, schedule_type, day_of_week, day_type, time)
+                    )
+                """)
+                
+                # Create index for efficient schedule lookups
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_zone_schedules_zone ON zone_schedules(zone_id)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_zone_schedules_type ON zone_schedules(zone_id, schedule_type)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_zone_schedules_time ON zone_schedules(time)")
+                
+                # Create app_config table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS app_config (
+                        config_key TEXT PRIMARY KEY,
+                        config_value TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+            except Exception:
+                # Tables may already exist depending on prior runs
+                pass
+
+            conn.execute("PRAGMA user_version = 4")
+            current_version = 4
             conn.commit()
         except Exception:
             # Rollback any partial changes on error

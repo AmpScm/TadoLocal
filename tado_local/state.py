@@ -69,6 +69,9 @@ class DeviceStateManager:
         self.optimistic_state: Dict[int, Dict[str, Any]] = {}  # device_id -> predicted state changes
         self.optimistic_timestamps: Dict[int, float] = {}  # device_id -> timestamp when prediction was made
         self.optimistic_timeout = 10.0  # Revert predictions after 10 seconds if no real update
+        
+        # Scheduled change tracking (to distinguish scheduled changes from user changes)
+        self._scheduled_changes: Dict[int, float] = {}  # zone_id -> timestamp of last scheduled change
 
         # Ensure DB schema and migrations are applied before using DB. All
         # schema updates are centralized in `tado_local.database.ensure_schema_and_migrate`.
@@ -605,6 +608,48 @@ class DeviceStateManager:
                 logger.debug(f"Applied optimistic state to device {device_id} (age: {age:.1f}s)")
         
         return state
+
+    def mark_scheduled_change(self, zone_id: int) -> None:
+        """Mark that a temperature change was scheduled for a zone.
+        
+        Args:
+            zone_id: Zone ID that had a scheduled change
+        """
+        self._scheduled_changes[zone_id] = time.time()
+        logger.debug(f"Marked scheduled change for zone {zone_id}")
+
+    def is_scheduled_change(self, zone_id: int, max_age_seconds: float = 10.0) -> bool:
+        """Check if a recent change was scheduled.
+        
+        Args:
+            zone_id: Zone ID to check
+            max_age_seconds: Maximum age in seconds for a scheduled change to be considered valid
+        
+        Returns:
+            True if a scheduled change was recorded within max_age_seconds, False otherwise
+        """
+        if zone_id not in self._scheduled_changes:
+            return False
+        
+        change_time = self._scheduled_changes[zone_id]
+        age = time.time() - change_time
+        
+        if age > max_age_seconds:
+            # Scheduled change is too old, clear it
+            del self._scheduled_changes[zone_id]
+            return False
+        
+        return True
+
+    def clear_scheduled_change(self, zone_id: int) -> None:
+        """Clear the scheduled change flag for a zone.
+        
+        Args:
+            zone_id: Zone ID to clear
+        """
+        if zone_id in self._scheduled_changes:
+            del self._scheduled_changes[zone_id]
+            logger.debug(f"Cleared scheduled change flag for zone {zone_id}")
 
     def get_all_devices(self) -> List[Dict]:
         """Get all registered devices."""

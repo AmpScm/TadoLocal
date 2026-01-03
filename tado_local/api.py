@@ -28,6 +28,7 @@ from aiohomekit.controller.ip.pairing import IpPairing
 
 from .state import DeviceStateManager
 from .homekit_uuids import get_characteristic_name
+from .scheduler import SchedulerService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -60,6 +61,9 @@ class TadoLocalAPI:
         self.subscribed_characteristics: List[tuple[int, int]] = []
         self.background_tasks: List[asyncio.Task] = []
         self.is_shutting_down = False
+        
+        # Scheduler service
+        self.scheduler_service: Optional[Any] = None
 
     async def initialize(self, pairing: IpPairing):
         """Initialize the API with a HomeKit pairing."""
@@ -75,6 +79,10 @@ class TadoLocalAPI:
         """Clean up resources and unsubscribe from events."""
         logger.info("Starting cleanup...")
         self.is_shutting_down = True
+
+        # Stop scheduler service
+        if self.scheduler_service:
+            await self.scheduler_service.stop()
 
         # Cancel all background tasks
         if self.background_tasks:
@@ -446,17 +454,60 @@ class TadoLocalAPI:
                         if field_name:
                             logger.debug(f"Updated device {accessory['id']} {field_name}: {old_val} -> {new_val}")
                             
+                            # Handle target_temperature changes - check if scheduled or manual
+                            if field_name == 'target_temperature' and is_zone_leader and device_id:
+                                zone_id = device_info.get('zone_id')
+                                if zone_id:
+                                    current_tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+                                    
+                                    # If in AUTO mode, check if the temperature matches scheduled temperature
+                                    if current_tracked_mode == 3:  # AUTO mode
+                                        # Check if this matches the latest scheduled temperature (within 0.1°C tolerance)
+                                        is_scheduled_match = False
+                                        
+                                        # First check if it was marked as scheduled change (quick path)
+                                        if self.state_manager.is_scheduled_change(zone_id, max_age_seconds=30.0):
+                                            is_scheduled_match = True
+                                            self.state_manager.clear_scheduled_change(zone_id)
+                                            logger.debug(f"Zone {zone_id} ({zone_name}): Temperature change was scheduled, keeping AUTO mode")
+                                        else:
+                                            # Check if the temperature matches the latest scheduled temperature
+                                            # (looks back through today and yesterday to find most recent schedule)
+                                            if hasattr(self, 'scheduler_service') and self.scheduler_service:
+                                                scheduled_temp = self.scheduler_service.get_latest_schedule_temperature(zone_id)
+                                                if scheduled_temp is not None:
+                                                    # Check if reported temperature matches latest scheduled (within 0.1°C tolerance)
+                                                    temp_diff = abs(float(value) - float(scheduled_temp))
+                                                    if temp_diff <= 0.1:
+                                                        is_scheduled_match = True
+                                                        logger.debug(f"Zone {zone_id} ({zone_name}): Temperature {value}°C matches latest scheduled {scheduled_temp}°C (diff: {temp_diff:.2f}°C), keeping AUTO mode")
+                                        
+                                        if not is_scheduled_match:
+                                            # Temperature doesn't match latest scheduled - this is a manual change
+                                            self.state_manager.set_zone_tracked_mode(zone_id, 1)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): Manual temperature change detected ({value}°C), switching from AUTO to HEAT mode")
+                            
                             # Sync tracked_mode when TargetHeatingCoolingState changes externally
                             if field_name == 'target_heating_cooling_state' and is_zone_leader and device_id:
                                 zone_id = device_info.get('zone_id')
                                 if zone_id:
                                     current_tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
-                                    # Update tracked_mode to match external change (0 or 1)
-                                    # If currently in Auto (3), exit Auto mode and match the external change
-                                    new_tracked_mode = int(value)  # value is 0 or 1 from HomeKit
-                                    if current_tracked_mode != new_tracked_mode:
-                                        self.state_manager.set_zone_tracked_mode(zone_id, new_tracked_mode)
-                                        logger.info(f"Zone {zone_id} ({zone_name}): tracked_mode updated from {current_tracked_mode} to {new_tracked_mode} (external change)")
+                                    new_hvac_state = int(value)  # value is 0 or 1 from HomeKit
+                                    
+                                    # If currently in Auto (3), only exit Auto mode if device reports OFF (0)
+                                    # If device reports HEAT (1), that's expected for Auto mode - don't exit Auto
+                                    if current_tracked_mode == 3:  # AUTO mode
+                                        if new_hvac_state == 0:  # Device reports OFF - user manually turned off
+                                            self.state_manager.set_zone_tracked_mode(zone_id, 0)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): Manual OFF detected, exiting AUTO mode (tracked_mode: 3 -> 0)")
+                                        # If new_hvac_state == 1, that's expected for Auto mode - device is just confirming our change
+                                        # Don't update tracked_mode, keep it at 3 (Auto)
+                                    else:
+                                        # Not in Auto mode - update tracked_mode to match external change
+                                        new_tracked_mode = new_hvac_state
+                                        if current_tracked_mode != new_tracked_mode:
+                                            self.state_manager.set_zone_tracked_mode(zone_id, new_tracked_mode)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): tracked_mode updated from {current_tracked_mode} to {new_tracked_mode} (external change)")
 
             # Skip logging during initialization
             if not self.is_initializing:

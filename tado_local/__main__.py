@@ -33,6 +33,7 @@ from .bridge import TadoBridge
 from .api import TadoLocalAPI
 from .cloud import TadoCloudAPI
 from .routes import create_app, register_routes
+from .scheduler import SchedulerService
 
 # Logger will be configured in main() based on daemon/console mode
 logger = logging.getLogger(__name__)
@@ -126,6 +127,11 @@ async def run_server(args):
 
         # Initialize the API with the pairing
         await tado_api.initialize(bridge_pairing)
+
+        # Initialize and start scheduler service
+        tado_api.scheduler_service = SchedulerService(str(db_path), tado_api)
+        tado_api.scheduler_service.start()
+        logger.info("Temperature scheduler service started")
 
         # Register mDNS service asynchronously (Avahi via DBus preferred, fall back to zeroconf)
         if not args.no_mdns:

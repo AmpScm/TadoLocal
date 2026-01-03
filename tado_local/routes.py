@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -914,6 +914,7 @@ def register_routes(app: FastAPI, get_tado_api):
         zone_name, leader_device_id, leader_serial = row
 
         # Handle mode parameter
+        switching_to_auto = False
         if mode is not None:
             mode_lower = mode.lower()
             if mode_lower == "auto":
@@ -921,7 +922,24 @@ def register_routes(app: FastAPI, get_tado_api):
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 3)
                 # Always set heating_enabled to True when entering Auto mode (override any explicit value)
                 heating_enabled = True
+                switching_to_auto = True
                 logger.info(f"Zone {zone_id} ({zone_name}): Setting to Auto mode (tracked_mode=3)")
+                
+                # Ignore any temperature parameter when switching to AUTO
+                # Find the most recent scheduled temperature (may be from hours earlier or previous day)
+                if tado_api.scheduler_service:
+                    scheduled_temp = tado_api.scheduler_service.get_latest_schedule_temperature(zone_id)
+                    if scheduled_temp is not None:
+                        temperature = scheduled_temp
+                        logger.info(f"Zone {zone_id} ({zone_name}): Applied latest scheduled temperature {scheduled_temp}°C on switch to AUTO mode")
+                    else:
+                        # No scheduled temperature - ignore temperature parameter and don't change temperature
+                        temperature = None
+                        logger.info(f"Zone {zone_id} ({zone_name}): No scheduled temperature found, keeping current temperature")
+                else:
+                    # No scheduler service - ignore temperature parameter
+                    temperature = None
+                    logger.info(f"Zone {zone_id} ({zone_name}): Scheduler service not available, ignoring temperature parameter")
             elif mode_lower == "off":
                 # Set tracked_mode to 0 (OFF) and HomeKit to 0 (OFF)
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
@@ -934,6 +952,15 @@ def register_routes(app: FastAPI, get_tado_api):
                     heating_enabled = True
             else:
                 raise HTTPException(status_code=400, detail="mode must be 'off', 'heat', or 'auto'")
+        
+        # If temperature is changed manually and zone is in AUTO mode, switch to HEAT
+        # But only if we're not currently switching to AUTO (which already handled temperature)
+        if temperature is not None and not switching_to_auto:
+            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            if current_tracked_mode == 3:  # AUTO mode
+                # Manual temperature change - switch to HEAT
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                logger.info(f"Zone {zone_id} ({zone_name}): Manual temperature change detected, switching from AUTO to HEAT mode")
 
         if not leader_device_id:
             # No explicit leader assigned - fall back to the first device in the zone
@@ -1033,6 +1060,335 @@ def register_routes(app: FastAPI, get_tado_api):
         except Exception as e:
             logger.error(f"Failed to control zone {zone_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set zone control: {str(e)}")
+
+    @app.get("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def get_zone_schedules(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get all schedules for a zone, grouped by type."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT schedule_id, schedule_type, day_of_week, day_type, time, temperature, enabled, created_at, updated_at
+            FROM zone_schedules
+            WHERE zone_id = ?
+            ORDER BY schedule_type, day_of_week, day_type, time
+        """, (zone_id,))
+        
+        schedules = []
+        for row in cursor.fetchall():
+            schedules.append({
+                'schedule_id': row['schedule_id'],
+                'schedule_type': row['schedule_type'],
+                'day_of_week': row['day_of_week'],
+                'day_type': row['day_type'],
+                'time': row['time'],
+                'temperature': row['temperature'],
+                'enabled': bool(row['enabled']),
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at']
+            })
+        
+        conn.close()
+        return {'zone_id': zone_id, 'schedules': schedules}
+
+    @app.get("/zones/{zone_id}/schedules/type", tags=["Schedules"])
+    async def get_zone_schedule_type(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get current schedule type for a zone (1, 2, or 3, or null if none)."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            SELECT DISTINCT schedule_type
+            FROM zone_schedules
+            WHERE zone_id = ?
+            LIMIT 1
+        """, (zone_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        schedule_type = row[0] if row else None
+        return {'zone_id': zone_id, 'schedule_type': schedule_type}
+
+    @app.post("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def create_zone_schedule(
+        zone_id: int,
+        schedule_type: int,
+        time: str,
+        temperature: float,
+        day_of_week: Optional[int] = None,
+        day_type: Optional[str] = None,
+        enabled: bool = True,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Create a new schedule entry for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Validate schedule_type
+        if schedule_type not in (1, 2, 3):
+            raise HTTPException(status_code=400, detail="schedule_type must be 1 (day_of_week), 2 (weekday_weekend), or 3 (all_day)")
+        
+        # Validate time format (HH:MM with 5-minute intervals)
+        import re
+        if not re.match(r'^([0-1][0-9]|2[0-3]):([0-5][05])$', time):
+            raise HTTPException(status_code=400, detail="time must be in HH:MM format with minutes in 5-minute intervals (00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)")
+        
+        # Validate schedule_type-specific fields
+        if schedule_type == 1:  # day_of_week
+            if day_of_week is None or day_of_week < 0 or day_of_week > 6:
+                raise HTTPException(status_code=400, detail="day_of_week must be 0-6 for schedule_type 1")
+            if day_type is not None:
+                raise HTTPException(status_code=400, detail="day_type must be NULL for schedule_type 1")
+        elif schedule_type == 2:  # weekday_weekend
+            if day_type not in ('weekday', 'weekend'):
+                raise HTTPException(status_code=400, detail="day_type must be 'weekday' or 'weekend' for schedule_type 2")
+            if day_of_week is not None:
+                raise HTTPException(status_code=400, detail="day_of_week must be NULL for schedule_type 2")
+        elif schedule_type == 3:  # all_day
+            if day_of_week is not None or day_type is not None:
+                raise HTTPException(status_code=400, detail="day_of_week and day_type must be NULL for schedule_type 3")
+        
+        # Check if zone has existing schedules of different type
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            SELECT DISTINCT schedule_type
+            FROM zone_schedules
+            WHERE zone_id = ? AND schedule_type != ?
+        """, (zone_id, schedule_type))
+        
+        existing_type = cursor.fetchone()
+        if existing_type:
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Zone already has schedules of type {existing_type[0]}. Clear existing schedules before creating schedules of type {schedule_type}."
+            )
+        
+        # Insert schedule
+        try:
+            cursor = conn.execute("""
+                INSERT INTO zone_schedules (zone_id, schedule_type, day_of_week, day_type, time, temperature, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (zone_id, schedule_type, day_of_week, day_type, time, temperature, 1 if enabled else 0))
+            schedule_id = cursor.lastrowid
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            conn.close()
+            raise HTTPException(status_code=400, detail=f"Schedule already exists: {str(e)}")
+        
+        conn.close()
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.put("/zones/{zone_id}/schedules/{schedule_id}", tags=["Schedules"])
+    async def update_zone_schedule(
+        zone_id: int,
+        schedule_id: int,
+        request: Request,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Update a schedule entry."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Parse JSON body
+        try:
+            body = await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
+        
+        # Extract fields from JSON body
+        time = body.get('time')
+        temperature = body.get('temperature')
+        enabled = body.get('enabled')
+        
+        # Validate and normalize inputs
+        # Handle empty strings as None
+        if time is not None and time == "":
+            time = None
+        if temperature is not None and temperature == "":
+            temperature = None
+        
+        # Validate time format if provided
+        if time is not None:
+            import re
+            if not isinstance(time, str) or not re.match(r'^([0-1][0-9]|2[0-3]):([0-5][05])$', time):
+                raise HTTPException(status_code=400, detail="time must be in HH:MM format with minutes in 5-minute intervals")
+        
+        # Validate temperature if provided
+        if temperature is not None:
+            try:
+                temperature = float(temperature)
+                if temperature < 5.0 or temperature > 30.0:
+                    raise HTTPException(status_code=400, detail="temperature must be between 5 and 30°C")
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="temperature must be a valid number")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        
+        # Check if schedule exists and belongs to zone
+        cursor = conn.execute("""
+            SELECT schedule_id FROM zone_schedules
+            WHERE schedule_id = ? AND zone_id = ?
+        """, (schedule_id, zone_id))
+        
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        
+        # Build update query
+        updates = []
+        params = []
+        
+        if time is not None:
+            updates.append("time = ?")
+            params.append(time)
+        if temperature is not None:
+            updates.append("temperature = ?")
+            params.append(temperature)
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+        
+        if not updates:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No fields to update. Please provide at least one of: time, temperature, or enabled")
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([schedule_id, zone_id])
+        
+        conn.execute(f"""
+            UPDATE zone_schedules
+            SET {', '.join(updates)}
+            WHERE schedule_id = ? AND zone_id = ?
+        """, params)
+        conn.commit()
+        conn.close()
+        
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.delete("/zones/{zone_id}/schedules/{schedule_id}", tags=["Schedules"])
+    async def delete_zone_schedule(
+        zone_id: int,
+        schedule_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Delete a schedule entry."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            DELETE FROM zone_schedules
+            WHERE schedule_id = ? AND zone_id = ?
+        """, (schedule_id, zone_id))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.delete("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def clear_zone_schedules(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Clear all schedules for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            DELETE FROM zone_schedules
+            WHERE zone_id = ?
+        """, (zone_id,))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return {'zone_id': zone_id, 'deleted_count': deleted, 'success': True}
+
+    @app.get("/zones/{zone_id}/schedules/current", tags=["Schedules"])
+    async def get_current_schedule_temperature(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get current scheduled temperature for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        if not tado_api.scheduler_service:
+            raise HTTPException(status_code=503, detail="Scheduler service not available")
+        
+        temperature = tado_api.scheduler_service.get_current_schedule_temperature(zone_id)
+        return {'zone_id': zone_id, 'temperature': temperature}
+
+    @app.get("/config/timezone", tags=["Configuration"])
+    async def get_timezone(api_key: Optional[str] = Depends(get_api_key)):
+        """Get configured timezone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        from .scheduler import get_timezone
+        timezone = get_timezone(tado_api.state_manager.db_path)
+        return {'timezone': timezone}
+
+    @app.put("/config/timezone", tags=["Configuration"])
+    async def set_timezone(
+        timezone: str,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Set timezone (e.g., 'Europe/Amsterdam')."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Validate timezone
+        try:
+            try:
+                from zoneinfo import ZoneInfo
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+            ZoneInfo(timezone)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid timezone: {str(e)}")
+        
+        # Store in database
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        conn.execute("""
+            INSERT OR REPLACE INTO app_config (config_key, config_value, updated_at)
+            VALUES ('timezone', ?, CURRENT_TIMESTAMP)
+        """, (timezone,))
+        conn.commit()
+        conn.close()
+        
+        # Clear timezone cache in scheduler service
+        if tado_api.scheduler_service:
+            tado_api.scheduler_service._timezone_cache = None
+        
+        return {'timezone': timezone, 'success': True}
 
     @app.get("/devices", tags=["Devices"])
     async def get_devices(api_key: Optional[str] = Depends(get_api_key)):

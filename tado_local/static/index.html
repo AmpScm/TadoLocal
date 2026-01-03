@@ -420,6 +420,96 @@
             height: 300px;
             margin-bottom: 20px;
         }
+
+        /* Scheduler */
+        .scheduler-controls {
+            padding: 20px 0;
+        }
+
+        .schedule-type-selector {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .radio-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+
+        .radio-label:hover {
+            background: #f5f5f5;
+        }
+
+        .radio-label input[type="radio"] {
+            cursor: pointer;
+        }
+
+        .scheduler-list {
+            margin: 20px 0;
+        }
+
+        .schedule-item {
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .schedule-item-info {
+            flex: 1;
+        }
+
+        .schedule-item-time {
+            font-weight: 500;
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+
+        .schedule-item-details {
+            font-size: 14px;
+            color: #666;
+        }
+
+        .schedule-item-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .schedule-item-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .schedule-item-toggle input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+        }
+
+        .scheduler-form {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .scheduler-form h3 {
+            margin-bottom: 20px;
+            font-size: 18px;
+            font-weight: 500;
+        }
     </style>
 </head>
 <body>
@@ -467,6 +557,7 @@
             <!-- Tabs -->
             <div class="tabs">
                 <button class="tab-button active" data-tab="controls">Controls</button>
+                <button class="tab-button" data-tab="scheduler">Scheduler</button>
                 <button class="tab-button" data-tab="history">History</button>
             </div>
 
@@ -493,6 +584,71 @@
                 <div class="action-buttons">
                     <button class="btn btn-secondary" id="btn-cancel">Cancel</button>
                     <button class="btn btn-primary" id="btn-apply">Apply</button>
+                </div>
+            </div>
+
+            <!-- Scheduler Tab -->
+            <div class="tab-content" id="tab-scheduler" style="display: none;">
+                <div class="scheduler-controls">
+                    <div class="control-group">
+                        <label class="control-label">Schedule Type</label>
+                        <div class="schedule-type-selector">
+                            <label class="radio-label">
+                                <input type="radio" name="schedule-type" value="1" id="schedule-type-1">
+                                <span>Day of Week (7 schedules)</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="schedule-type" value="2" id="schedule-type-2">
+                                <span>Weekday/Weekend (2 schedules)</span>
+                            </label>
+                            <label class="radio-label">
+                                <input type="radio" name="schedule-type" value="3" id="schedule-type-3">
+                                <span>All Day (1 schedule)</span>
+                            </label>
+                        </div>
+                        <div id="schedule-type-warning" style="display: none; color: #f44336; margin-top: 10px; font-size: 14px;">
+                            ⚠️ Zone has existing schedules of a different type. Clear all schedules before switching types.
+                        </div>
+                    </div>
+                    
+                    <div class="loading" id="scheduler-loading" style="display: none;">Loading schedules...</div>
+                    <div class="scheduler-list" id="scheduler-list"></div>
+                    
+                    <div class="scheduler-form" id="scheduler-form" style="display: none;">
+                        <h3 id="scheduler-form-title">Add Schedule</h3>
+                        <div class="control-group">
+                            <label class="control-label" id="scheduler-day-label">Day</label>
+                            <select id="scheduler-day-select" class="history-select"></select>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Time (5-minute intervals)</label>
+                            <input type="time" id="scheduler-time-input" class="history-select" step="300" required>
+                            <div id="time-validation-error" style="display: none; color: #f44336; font-size: 12px; margin-top: 5px;">
+                                Time must be in 5-minute intervals (e.g., 08:00, 08:05, 08:10)
+                            </div>
+                        </div>
+                        <div class="control-group">
+                            <label class="control-label">Temperature</label>
+                            <div class="temp-control">
+                                <button class="temp-button" id="scheduler-temp-down">−</button>
+                                <div class="temp-display" id="scheduler-temp-display">20°</div>
+                                <button class="temp-button" id="scheduler-temp-up">+</button>
+                            </div>
+                        </div>
+                        <div class="action-buttons">
+                            <button class="btn btn-secondary" id="scheduler-cancel">Cancel</button>
+                            <button class="btn btn-secondary" id="scheduler-save-another">Save & Add Another</button>
+                            <button class="btn btn-primary" id="scheduler-save">Save</button>
+                        </div>
+                    </div>
+                    
+                    <div class="action-buttons" style="margin-top: 20px;">
+                        <button class="btn btn-primary" id="scheduler-add">Add Schedule</button>
+                        <button class="btn btn-secondary" id="scheduler-clear-all">Clear All</button>
+                    </div>
+                    <div style="margin-top: 15px; padding: 10px; background: #e3f2fd; border-radius: 6px; font-size: 14px; color: #1976d2;">
+                        💡 <strong>Tip:</strong> You can add multiple time slots for each schedule type. For example, you can set different temperatures for morning, afternoon, and evening on the same day.
+                    </div>
                 </div>
             </div>
 
@@ -1123,12 +1279,14 @@
             if (!currentZone) return;
 
             const params = new URLSearchParams();
-            params.append('temperature', tempValue);
             
             // Add mode parameter if set to auto, otherwise use heating_enabled
             if (modeValue === 'auto') {
                 params.append('mode', 'auto');
+                // Don't send temperature when switching to AUTO - it will use scheduled temperature if available
             } else {
+                // Only send temperature when not in AUTO mode
+                params.append('temperature', tempValue);
                 params.append('heating_enabled', modeValue === 'heat' ? 'true' : 'false');
             }
 
@@ -1259,6 +1417,437 @@
             }
         });
 
+        // Scheduler variables
+        let schedulerSchedules = [];
+        let schedulerType = null;
+        let editingScheduleId = null;
+        let schedulerTempValue = 20;
+
+        // Validate time is in 5-minute intervals
+        function validateTime(timeStr) {
+            if (!timeStr) return false;
+            const parts = timeStr.split(':');
+            if (parts.length !== 2) return false;
+            const minutes = parseInt(parts[1]);
+            return minutes % 5 === 0;
+        }
+
+        // Round time to nearest 5-minute interval (round down)
+        function roundTimeTo5Minutes(timeStr) {
+            if (!timeStr) return '';
+            const parts = timeStr.split(':');
+            if (parts.length !== 2) return timeStr;
+            const hours = parseInt(parts[0]);
+            const minutes = parseInt(parts[1]);
+            const roundedMinutes = Math.floor(minutes / 5) * 5;
+            return `${String(hours).padStart(2, '0')}:${String(roundedMinutes).padStart(2, '0')}`;
+        }
+
+        // Load schedules for current zone
+        async function loadSchedules() {
+            if (!currentZone) return;
+            
+            const loadingEl = document.getElementById('scheduler-loading');
+            const listEl = document.getElementById('scheduler-list');
+            
+            loadingEl.style.display = 'block';
+            listEl.innerHTML = '';
+            
+            try {
+                // Get schedule type
+                const typeResponse = await fetch(`/zones/${currentZone.zone_id}/schedules/type`);
+                if (typeResponse.ok) {
+                    const typeData = await typeResponse.json();
+                    schedulerType = typeData.schedule_type;
+                    
+                    // Update radio buttons
+                    if (schedulerType) {
+                        document.getElementById(`schedule-type-${schedulerType}`).checked = true;
+                        document.getElementById(`schedule-type-${schedulerType}`).disabled = false;
+                    }
+                }
+                
+                // Get schedules
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules`);
+                if (!response.ok) throw new Error('Failed to load schedules');
+                
+                const data = await response.json();
+                schedulerSchedules = data.schedules || [];
+                
+                renderSchedules();
+            } catch (error) {
+                listEl.innerHTML = `<div style="color: #c62828; padding: 20px;">Error loading schedules: ${error.message}</div>`;
+            } finally {
+                loadingEl.style.display = 'none';
+            }
+        }
+
+        // Render schedules list
+        function renderSchedules() {
+            const listEl = document.getElementById('scheduler-list');
+            if (!listEl) return;
+            
+            if (schedulerSchedules.length === 0) {
+                listEl.innerHTML = '<div style="color: #666; padding: 20px; text-align: center;">No schedules configured</div>';
+                return;
+            }
+            
+            listEl.innerHTML = schedulerSchedules.map((schedule, index) => {
+                let dayLabel = '';
+                if (schedule.schedule_type === 1) {
+                    const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                    dayLabel = days[schedule.day_of_week];
+                } else if (schedule.schedule_type === 2) {
+                    dayLabel = schedule.day_type === 'weekday' ? 'Weekdays' : 'Weekends';
+                } else {
+                    dayLabel = 'Every day';
+                }
+                
+                return `
+                    <div class="schedule-item" data-schedule-id="${schedule.schedule_id}">
+                        <div class="schedule-item-info">
+                            <div class="schedule-item-time">${schedule.time} - ${schedule.temperature}°C</div>
+                            <div class="schedule-item-details">${dayLabel}</div>
+                        </div>
+                        <div class="schedule-item-actions">
+                            <div class="schedule-item-toggle">
+                                <input type="checkbox" data-schedule-id="${schedule.schedule_id}" ${schedule.enabled ? 'checked' : ''}>
+                                <span>Enabled</span>
+                            </div>
+                            <button class="btn btn-secondary" data-action="edit" data-schedule-id="${schedule.schedule_id}">Edit</button>
+                            <button class="btn btn-secondary" data-action="delete" data-schedule-id="${schedule.schedule_id}">Delete</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // Attach event listeners
+            listEl.querySelectorAll('input[type="checkbox"]').forEach(checkbox => {
+                checkbox.addEventListener('change', (e) => {
+                    const scheduleId = parseInt(e.target.dataset.scheduleId);
+                    toggleSchedule(scheduleId, e.target.checked);
+                });
+            });
+            
+            listEl.querySelectorAll('button[data-action="edit"]').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const scheduleId = parseInt(e.target.dataset.scheduleId);
+                    editSchedule(scheduleId);
+                });
+            });
+            
+            listEl.querySelectorAll('button[data-action="delete"]').forEach(button => {
+                button.addEventListener('click', (e) => {
+                    const scheduleId = parseInt(e.target.dataset.scheduleId);
+                    deleteSchedule(scheduleId);
+                });
+            });
+        }
+
+        // Toggle schedule enabled state
+        async function toggleSchedule(scheduleId, enabled) {
+            try {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!response.ok) throw new Error('Failed to update schedule');
+                await loadSchedules();
+            } catch (error) {
+                showError('Failed to update schedule: ' + error.message);
+            }
+        }
+
+        // Delete schedule
+        async function deleteSchedule(scheduleId) {
+            if (!confirm('Delete this schedule?')) return;
+            
+            try {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to delete schedule');
+                await loadSchedules();
+            } catch (error) {
+                showError('Failed to delete schedule: ' + error.message);
+            }
+        }
+
+        // Edit schedule
+        function editSchedule(scheduleId) {
+            const schedule = schedulerSchedules.find(s => s.schedule_id === scheduleId);
+            if (!schedule) return;
+            
+            editingScheduleId = scheduleId;
+            schedulerTempValue = schedule.temperature;
+            
+            document.getElementById('scheduler-form-title').textContent = 'Edit Schedule';
+            document.getElementById('scheduler-temp-display').textContent = `${schedulerTempValue}°`;
+            
+            // Set schedule type
+            document.getElementById(`schedule-type-${schedule.schedule_type}`).checked = true;
+            updateScheduleForm();
+            
+            // Set day
+            if (schedule.schedule_type === 1) {
+                document.getElementById('scheduler-day-select').value = schedule.day_of_week;
+            } else if (schedule.schedule_type === 2) {
+                document.getElementById('scheduler-day-select').value = schedule.day_type;
+            }
+            
+            // Set time
+            document.getElementById('scheduler-time-input').value = schedule.time;
+            
+            document.getElementById('scheduler-form').style.display = 'block';
+        }
+
+        // Update schedule form based on type
+        function updateScheduleForm() {
+            const type = parseInt(document.querySelector('input[name="schedule-type"]:checked')?.value || '0');
+            const daySelect = document.getElementById('scheduler-day-select');
+            const dayLabel = document.getElementById('scheduler-day-label');
+            const warningEl = document.getElementById('schedule-type-warning');
+            
+            daySelect.innerHTML = '';
+            
+            if (type === 1) {
+                dayLabel.textContent = 'Day of Week';
+                const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                days.forEach((day, index) => {
+                    const option = document.createElement('option');
+                    option.value = index;
+                    option.textContent = day;
+                    daySelect.appendChild(option);
+                });
+                daySelect.style.display = 'block';
+            } else if (type === 2) {
+                dayLabel.textContent = 'Day Type';
+                ['weekday', 'weekend'].forEach(dayType => {
+                    const option = document.createElement('option');
+                    option.value = dayType;
+                    option.textContent = dayType === 'weekday' ? 'Weekdays' : 'Weekends';
+                    daySelect.appendChild(option);
+                });
+                daySelect.style.display = 'block';
+            } else if (type === 3) {
+                dayLabel.textContent = '';
+                daySelect.style.display = 'none';
+            }
+            
+            // Check for type conflict
+            if (schedulerType && schedulerType !== type) {
+                warningEl.style.display = 'block';
+                document.querySelectorAll('input[name="schedule-type"]').forEach(radio => {
+                    if (parseInt(radio.value) !== schedulerType) {
+                        radio.disabled = true;
+                    }
+                });
+            } else {
+                warningEl.style.display = 'none';
+                document.querySelectorAll('input[name="schedule-type"]').forEach(radio => {
+                    radio.disabled = false;
+                });
+            }
+        }
+
+        // Save schedule
+        async function saveSchedule(keepFormOpen = false) {
+            if (!currentZone) return;
+            
+            const type = parseInt(document.querySelector('input[name="schedule-type"]:checked')?.value);
+            if (!type) {
+                showError('Please select a schedule type');
+                return;
+            }
+            
+            const timeInput = document.getElementById('scheduler-time-input');
+            let time = timeInput.value.trim();
+            const validationError = document.getElementById('time-validation-error');
+            
+            // Validate time is provided and in 5-minute intervals
+            if (!time) {
+                validationError.textContent = 'Time is required';
+                validationError.style.display = 'block';
+                timeInput.focus();
+                return;
+            }
+            
+            if (!validateTime(time)) {
+                validationError.style.display = 'block';
+                timeInput.focus();
+                return;
+            }
+            validationError.style.display = 'none';
+            
+            // Round to 5-minute interval (in case browser allows other values)
+            time = roundTimeTo5Minutes(time);
+            
+            // Ensure temperature is valid
+            const temperature = parseFloat(schedulerTempValue);
+            if (isNaN(temperature) || temperature < 5 || temperature > 30) {
+                showError('Temperature must be between 5 and 30°C');
+                return;
+            }
+            
+            let dayOfWeek = null;
+            let dayType = null;
+            
+            if (type === 1) {
+                dayOfWeek = parseInt(document.getElementById('scheduler-day-select').value);
+            } else if (type === 2) {
+                dayType = document.getElementById('scheduler-day-select').value;
+            }
+            
+            // Ensure we have valid values before sending
+            if (!time || !temperature) {
+                showError('Time and temperature are required');
+                return;
+            }
+            
+            try {
+                let response;
+                if (editingScheduleId) {
+                    // Update existing - always send both time and temperature
+                    const updateData = {};
+                    if (time) updateData.time = time;
+                    if (temperature !== null && temperature !== undefined) {
+                        updateData.temperature = parseFloat(temperature);
+                    }
+                    
+                    if (Object.keys(updateData).length === 0) {
+                        showError('No changes to save');
+                        return;
+                    }
+                    
+                    response = await fetch(`/zones/${currentZone.zone_id}/schedules/${editingScheduleId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(updateData)
+                    });
+                } else {
+                    // Create new
+                    const params = new URLSearchParams();
+                    params.append('schedule_type', type);
+                    params.append('time', time);
+                    params.append('temperature', temperature);
+                    if (dayOfWeek !== null) params.append('day_of_week', dayOfWeek);
+                    if (dayType !== null) params.append('day_type', dayType);
+                    
+                    response = await fetch(`/zones/${currentZone.zone_id}/schedules?${params}`, {
+                        method: 'POST'
+                    });
+                }
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to save schedule');
+                }
+                
+                if (keepFormOpen) {
+                    // Reset form for adding another schedule
+                    editingScheduleId = null;
+                    schedulerTempValue = 20;
+                    document.getElementById('scheduler-form-title').textContent = 'Add Schedule';
+                    document.getElementById('scheduler-temp-display').textContent = '20°';
+                    // Keep form open and reset time/day to defaults
+                    document.getElementById('scheduler-time-input').value = '';
+                    document.getElementById('time-validation-error').style.display = 'none';
+                    const daySelect = document.getElementById('scheduler-day-select');
+                    if (daySelect.options.length > 0) {
+                        daySelect.selectedIndex = 0;
+                    }
+                    showSuccess('Schedule saved! You can add another schedule.');
+                } else {
+                    document.getElementById('scheduler-form').style.display = 'none';
+                    editingScheduleId = null;
+                }
+                await loadSchedules();
+            } catch (error) {
+                showError('Failed to save schedule: ' + error.message);
+            }
+        }
+
+        // Clear all schedules
+        async function clearAllSchedules() {
+            if (!confirm('Clear all schedules for this zone?')) return;
+            
+            try {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules`, {
+                    method: 'DELETE'
+                });
+                if (!response.ok) throw new Error('Failed to clear schedules');
+                schedulerType = null;
+                await loadSchedules();
+            } catch (error) {
+                showError('Failed to clear schedules: ' + error.message);
+            }
+        }
+
+        // Initialize scheduler form
+        function initSchedulerForm() {
+            // Add time input validation
+            const timeInput = document.getElementById('scheduler-time-input');
+            if (timeInput) {
+                timeInput.addEventListener('change', function() {
+                    const validationError = document.getElementById('time-validation-error');
+                    if (!validateTime(this.value)) {
+                        validationError.style.display = 'block';
+                        // Auto-round to nearest 5-minute interval
+                        const rounded = roundTimeTo5Minutes(this.value);
+                        if (rounded !== this.value) {
+                            this.value = rounded;
+                            validationError.style.display = 'none';
+                        }
+                    } else {
+                        validationError.style.display = 'none';
+                    }
+                });
+                
+                timeInput.addEventListener('blur', function() {
+                    if (this.value && !validateTime(this.value)) {
+                        // Round to nearest 5-minute interval on blur
+                        this.value = roundTimeTo5Minutes(this.value);
+                        document.getElementById('time-validation-error').style.display = 'none';
+                    }
+                });
+            }
+            
+            // Schedule type radio buttons
+            document.querySelectorAll('input[name="schedule-type"]').forEach(radio => {
+                radio.addEventListener('change', updateScheduleForm);
+            });
+            
+            // Temperature controls
+            document.getElementById('scheduler-temp-down').addEventListener('click', () => {
+                schedulerTempValue = Math.max(5, schedulerTempValue - 0.5);
+                document.getElementById('scheduler-temp-display').textContent = `${schedulerTempValue}°`;
+            });
+            
+            document.getElementById('scheduler-temp-up').addEventListener('click', () => {
+                schedulerTempValue = Math.min(30, schedulerTempValue + 0.5);
+                document.getElementById('scheduler-temp-display').textContent = `${schedulerTempValue}°`;
+            });
+            
+            // Form buttons
+            document.getElementById('scheduler-add').addEventListener('click', () => {
+                editingScheduleId = null;
+                schedulerTempValue = 20;
+                document.getElementById('scheduler-form-title').textContent = 'Add Schedule';
+                document.getElementById('scheduler-temp-display').textContent = '20°';
+                document.getElementById('scheduler-form').style.display = 'block';
+                updateScheduleForm();
+            });
+            
+            document.getElementById('scheduler-cancel').addEventListener('click', () => {
+                document.getElementById('scheduler-form').style.display = 'none';
+                editingScheduleId = null;
+            });
+            
+            document.getElementById('scheduler-save').addEventListener('click', saveSchedule);
+            document.getElementById('scheduler-clear-all').addEventListener('click', clearAllSchedules);
+        }
+
         // Tab switching
         document.querySelectorAll('.tab-button').forEach(button => {
             button.addEventListener('click', (e) => {
@@ -1274,10 +1863,12 @@
                 });
                 document.getElementById(`tab-${tab}`).style.display = 'block';
                 
-                // Load history when history tab is opened
+                // Load data when tab is opened
                 if (tab === 'history' && currentZone) {
                     const hours = parseInt(document.getElementById('history-period').value);
                     loadHistory(currentZone.zone_id, hours);
+                } else if (tab === 'scheduler' && currentZone) {
+                    loadSchedules();
                 }
             });
         });
@@ -1301,6 +1892,7 @@
         });
 
         // Initialize
+        initSchedulerForm();
         loadZones();
         loadStatus();
         setupEventStream();
