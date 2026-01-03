@@ -1003,19 +1003,30 @@ def register_routes(app: FastAPI, get_tado_api):
                 char_updates['target_temperature'] = temperature
 
         if heating_enabled is not None:
-            # heating_enabled directly controls HVAC mode (overrides Auto mode)
+            # heating_enabled directly controls HVAC mode
+            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            
             if heating_enabled:
-                # Set HVAC to HEAT (1) and update tracked_mode to HEAT (1)
+                # Set HVAC to HEAT (1)
                 char_updates['target_heating_cooling_state'] = 1
-                # Update tracked_mode to HEAT (1) - heating_enabled takes precedence over mode
-                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
-                logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT and tracked_mode to 1")
+                # Only update tracked_mode if not in Auto mode (3)
+                # When mode=auto, tracked_mode should remain 3 (Auto)
+                if current_tracked_mode != 3:
+                    tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                    logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT and tracked_mode to 1")
+                else:
+                    logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT, keeping tracked_mode at 3 (Auto)")
             else:
                 # Set HVAC to OFF (0) and update tracked_mode to OFF (0)
+                # Even in Auto mode, turning off should exit Auto mode
                 char_updates['target_heating_cooling_state'] = 0
-                # Update tracked_mode to OFF (0) - heating_enabled takes precedence over mode
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
                 logger.debug(f"Zone {zone_id}: heating_enabled=false - setting HVAC to OFF and tracked_mode to 0")
+        
+        # If switching to Auto mode, ensure HVAC is set to HEAT (even if heating_enabled wasn't processed)
+        if switching_to_auto and 'target_heating_cooling_state' not in char_updates:
+            char_updates['target_heating_cooling_state'] = 1
+            logger.debug(f"Zone {zone_id}: Auto mode - ensuring HVAC is set to HEAT (1)")
 
         if not char_updates:
             raise HTTPException(status_code=400, detail="No control parameters provided")
