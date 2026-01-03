@@ -1367,13 +1367,54 @@ def register_routes(app: FastAPI, get_tado_api):
         
         # Validate timezone
         try:
+            # Import ZoneInfo (try standard library first, then backport)
+            ZoneInfoNotFoundError = None
             try:
                 from zoneinfo import ZoneInfo
+                # Try to import the exception class
+                try:
+                    from zoneinfo._zoneinfo import ZoneInfoNotFoundError
+                except (ImportError, AttributeError):
+                    try:
+                        from zoneinfo import ZoneInfoNotFoundError
+                    except ImportError:
+                        pass  # Will catch KeyError instead
             except ImportError:
                 from backports.zoneinfo import ZoneInfo
-            ZoneInfo(timezone)
+                try:
+                    from backports.zoneinfo.exceptions import ZoneInfoNotFoundError
+                except ImportError:
+                    pass  # backports.zoneinfo raises KeyError when timezone not found
+            
+            # Validate the timezone
+            try:
+                ZoneInfo(timezone)
+            except Exception as e:
+                # Check if this is a "timezone not found" error
+                error_msg = str(e)
+                is_timezone_not_found = (
+                    "No time zone found" in error_msg or
+                    "timezone" in error_msg.lower() and "not found" in error_msg.lower() or
+                    isinstance(e, KeyError) or
+                    (ZoneInfoNotFoundError and isinstance(e, ZoneInfoNotFoundError))
+                )
+                
+                if is_timezone_not_found:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Timezone '{timezone}' not found. This may be due to missing timezone data. "
+                               f"On Linux systems, install the system 'tzdata' package (e.g., 'apt-get install tzdata' "
+                               f"or 'yum install tzdata'). If using backports.zoneinfo, you may also need to "
+                               f"install the Python 'tzdata' package: 'pip install tzdata'. "
+                               f"Original error: {error_msg}"
+                    )
+                else:
+                    # Some other error during validation
+                    raise HTTPException(status_code=400, detail=f"Invalid timezone '{timezone}': {error_msg}")
+        except HTTPException:
+            raise
         except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Invalid timezone: {str(e)}")
+            raise HTTPException(status_code=400, detail=f"Error validating timezone '{timezone}': {str(e)}")
         
         # Store in database
         conn = sqlite3.connect(tado_api.state_manager.db_path)
