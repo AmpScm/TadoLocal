@@ -440,11 +440,13 @@ def register_routes(app: FastAPI, get_tado_api):
         - Current temperature (°C and °F)
         - Current humidity (%)
         - Target temperature (°C and °F)
-        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState
+        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState from HomeKit
+        - Tracked mode (0=Off, 1=Heat, 3=Auto) - Internal tracked mode per zone
         - Currently heating (0=Off, 1=Heating, 2=Cooling) - CurrentHeatingCoolingState
 
         Note: Mode values depend on device capabilities. Heating-only devices typically
         support 0 (Off) and 1 (Heat). Devices with cooling may support additional values.
+        Tracked mode includes Auto (3) which is tracked internally but appears as Heat (1) to HomeKit.
 
         For individual device details, use /thermostats or /devices endpoints.
 
@@ -596,11 +598,13 @@ def register_routes(app: FastAPI, get_tado_api):
         - Current temperature (°C and °F)
         - Current humidity (%)
         - Target temperature (°C and °F)
-        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState
+        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState from HomeKit
+        - Tracked mode (0=Off, 1=Heat, 3=Auto) - Internal tracked mode per zone
         - Currently heating (0=Off, 1=Heating, 2=Cooling) - CurrentHeatingCoolingState
 
         Note: Mode values depend on device capabilities. Heating-only devices typically
         support 0 (Off) and 1 (Heat). Devices with cooling may support additional values.
+        Tracked mode includes Auto (3) which is tracked internally but appears as Heat (1) to HomeKit.
 
         For individual device details, use /thermostats or /devices endpoints.
 
@@ -761,10 +765,23 @@ def register_routes(app: FastAPI, get_tado_api):
         conn.commit()
         conn.close()
 
-        # Reload device cache to pick up zone info
+        # Reload zone cache to pick up new zone
+        tado_api.state_manager._load_zone_cache()
         tado_api.state_manager._load_device_cache()
 
-        return {'zone_id': zone_id, 'name': name}
+        # Return full zone object with tracked_mode
+        zone_info = tado_api.state_manager.zone_cache.get(zone_id)
+        if zone_info:
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            return {
+                'zone_id': zone_id,
+                'name': name,
+                'leader_device_id': leader_device_id,
+                'order_id': order_id,
+                'tracked_mode': tracked_mode
+            }
+        else:
+            return {'zone_id': zone_id, 'name': name}
 
     @app.put("/zones/{zone_id}", tags=["Zones"])
     async def update_zone(zone_id: int, name: Optional[str] = None, leader_device_id: Optional[int] = None, order_id: Optional[int] = None, api_key: Optional[str] = Depends(get_api_key)):
@@ -795,10 +812,24 @@ def register_routes(app: FastAPI, get_tado_api):
         conn.commit()
         conn.close()
 
-        # Reload device cache
+        # Reload zone and device cache
+        tado_api.state_manager._load_zone_cache()
         tado_api.state_manager._load_device_cache()
 
-        return {'zone_id': zone_id, 'updated': True}
+        # Return full zone object with tracked_mode
+        zone_info = tado_api.state_manager.zone_cache.get(zone_id)
+        if zone_info:
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            return {
+                'zone_id': zone_id,
+                'name': zone_info.get('name'),
+                'leader_device_id': zone_info.get('leader_device_id'),
+                'order_id': zone_info.get('order_id'),
+                'tracked_mode': tracked_mode,
+                'updated': True
+            }
+        else:
+            return {'zone_id': zone_id, 'updated': True}
 
     @app.post("/zones/{zone_id}/set", tags=["Zones"])
     async def set_zone(
@@ -888,9 +919,9 @@ def register_routes(app: FastAPI, get_tado_api):
             if mode_lower == "auto":
                 # Set tracked_mode to 3 (Auto) and HomeKit to 1 (HEAT)
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 3)
-                # Ensure heating_enabled is set to True when entering Auto mode
-                if heating_enabled is None:
-                    heating_enabled = True
+                # Always set heating_enabled to True when entering Auto mode (override any explicit value)
+                heating_enabled = True
+                logger.info(f"Zone {zone_id} ({zone_name}): Setting to Auto mode (tracked_mode=3)")
             elif mode_lower == "off":
                 # Set tracked_mode to 0 (OFF) and HomeKit to 0 (OFF)
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
@@ -948,8 +979,10 @@ def register_routes(app: FastAPI, get_tado_api):
             current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
             
             # If in Auto mode (3), always set HomeKit to HEAT (1)
+            # This ensures Auto mode always shows as HEAT to HomeKit
             if current_tracked_mode == 3:
                 char_updates['target_heating_cooling_state'] = 1
+                logger.debug(f"Zone {zone_id}: Auto mode - setting HomeKit to HEAT (1)")
             else:
                 # Otherwise, set HomeKit to match heating_enabled
                 char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0

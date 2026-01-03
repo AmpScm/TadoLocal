@@ -227,7 +227,7 @@
 
         .mode-buttons {
             display: grid;
-            grid-template-columns: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
             gap: 10px;
         }
 
@@ -486,6 +486,7 @@
                     <div class="mode-buttons">
                         <button class="mode-button" id="mode-heat" data-mode="heat">Heat</button>
                         <button class="mode-button" id="mode-off" data-mode="off">Off</button>
+                        <button class="mode-button" id="mode-auto" data-mode="auto">Auto</button>
                     </div>
                 </div>
 
@@ -949,52 +950,75 @@
             }
 
             grid.innerHTML = zones.map(zone => {
-                const state = zone.state || {};
-                const temp = state.cur_temp_c;
-                const humidity = state.hum_perc;
-                const target = state.target_temp_c || '--';
-                const mode = state.mode || 0;
-                const curHeating = state.cur_heating || 0;
-                const batteryLow = state.battery_low;
-                
-                // Format temperature with one decimal, split for styling
-                let tempHtml = '--';
-                if (temp !== null && temp !== undefined) {
-                    const tempStr = temp.toFixed(1);
-                    const parts = tempStr.split('.');
-                    tempHtml = `${parts[0]}<span class="zone-temp-decimal">.${parts[1]}</span>`;
-                }
-                
-                let cardClass = 'zone-card';
-                let statusText = '';
-                
-                if (mode === 0) {
-                    // Off / Frost protection
-                    cardClass += ' off';
-                    statusText = 'Off';
+            const state = zone.state || {};
+            const temp = state.cur_temp_c;
+            const humidity = state.hum_perc;
+            const target = state.target_temp_c || '--';
+            const mode = state.mode || 0;
+            const trackedMode = state.tracked_mode !== undefined ? state.tracked_mode : (mode || 0);
+            const curHeating = state.cur_heating || 0;
+            const batteryLow = state.battery_low;
+            
+            // Format temperature with one decimal, split for styling
+            let tempHtml = '--';
+            if (temp !== null && temp !== undefined) {
+                const tempStr = temp.toFixed(1);
+                const parts = tempStr.split('.');
+                tempHtml = `${parts[0]}<span class="zone-temp-decimal">.${parts[1]}</span>`;
+            }
+            
+            let cardClass = 'zone-card';
+            let statusText = '';
+            
+            if (trackedMode === 0) {
+                // Off / Frost protection
+                cardClass += ' off';
+                statusText = 'Off';
+            } else if (trackedMode === 3) {
+                // Auto mode
+                // Color by actual current temperature regardless of heating status
+                if (temp !== null && temp !== undefined && temp < 17) {
+                    cardClass += ' heating-cold';
+                } else if (temp !== null && temp !== undefined && temp <= 22) {
+                    cardClass += ' heating-medium';
+                } else if (temp !== null && temp !== undefined) {
+                    cardClass += ' heating-hot';
                 } else {
-                    // Mode is on (heating enabled)
-                    // Color by actual current temperature regardless of heating status
-                    if (temp !== null && temp !== undefined && temp < 17) {
-                        cardClass += ' heating-cold';
-                    } else if (temp !== null && temp !== undefined && temp <= 22) {
-                        cardClass += ' heating-medium';
-                    } else if (temp !== null && temp !== undefined) {
-                        cardClass += ' heating-hot';
-                    } else {
-                        // No temperature data, default to medium
-                        cardClass += ' heating-medium';
-                    }
-                    
-                    // Status text depends on whether actively heating/cooling
-                    if (curHeating === 1) {
-                        statusText = `Heating to ${target}°`;
-                    } else if (curHeating === 2) {
-                        statusText = `Cooling to ${target}°`;
-                    } else {
-                        statusText = `Target ${target}°`;
-                    }
+                    // No temperature data, default to medium
+                    cardClass += ' heating-medium';
                 }
+                
+                // Status text for Auto mode
+                if (curHeating === 1) {
+                    statusText = `Auto - Heating to ${target}°`;
+                } else if (curHeating === 2) {
+                    statusText = `Auto - Cooling to ${target}°`;
+                } else {
+                    statusText = `Auto - Target ${target}°`;
+                }
+            } else {
+                // Mode is on (heating enabled)
+                // Color by actual current temperature regardless of heating status
+                if (temp !== null && temp !== undefined && temp < 17) {
+                    cardClass += ' heating-cold';
+                } else if (temp !== null && temp !== undefined && temp <= 22) {
+                    cardClass += ' heating-medium';
+                } else if (temp !== null && temp !== undefined) {
+                    cardClass += ' heating-hot';
+                } else {
+                    // No temperature data, default to medium
+                    cardClass += ' heating-medium';
+                }
+                
+                // Status text depends on whether actively heating/cooling
+                if (curHeating === 1) {
+                    statusText = `Heating to ${target}°`;
+                } else if (curHeating === 2) {
+                    statusText = `Cooling to ${target}°`;
+                } else {
+                    statusText = `Target ${target}°`;
+                }
+            }
 
                 // Show icon based on cur_heating state
                 // 0 = off (no icon), 1 = heating (flame), 2 = cooling (frost/snowflake)
@@ -1052,7 +1076,15 @@
             }
             
             tempValue = state.target_temp_c || 20;
-            modeValue = (state.mode === 0) ? 'off' : 'heat';
+            // Use tracked_mode if available, otherwise fall back to mode
+            const trackedMode = state.tracked_mode !== undefined ? state.tracked_mode : (state.mode || 0);
+            if (trackedMode === 0) {
+                modeValue = 'off';
+            } else if (trackedMode === 3) {
+                modeValue = 'auto';
+            } else {
+                modeValue = 'heat';
+            }
             
             updateTempDisplay();
             updateModeButtons();
@@ -1084,6 +1116,7 @@
         function updateModeButtons() {
             document.getElementById('mode-heat').classList.toggle('active', modeValue === 'heat');
             document.getElementById('mode-off').classList.toggle('active', modeValue === 'off');
+            document.getElementById('mode-auto').classList.toggle('active', modeValue === 'auto');
         }
 
         async function applyChanges() {
@@ -1091,7 +1124,13 @@
 
             const params = new URLSearchParams();
             params.append('temperature', tempValue);
-            params.append('heating_enabled', modeValue === 'heat' ? 'true' : 'false');
+            
+            // Add mode parameter if set to auto, otherwise use heating_enabled
+            if (modeValue === 'auto') {
+                params.append('mode', 'auto');
+            } else {
+                params.append('heating_enabled', modeValue === 'heat' ? 'true' : 'false');
+            }
 
             try {
                 const response = await fetch(`/zones/${currentZone.zone_id}/set?${params}`, {
@@ -1203,6 +1242,11 @@
 
         document.getElementById('mode-off').addEventListener('click', () => {
             modeValue = 'off';
+            updateModeButtons();
+        });
+
+        document.getElementById('mode-auto').addEventListener('click', () => {
+            modeValue = 'auto';
             updateModeButtons();
         });
 
