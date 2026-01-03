@@ -920,8 +920,9 @@ def register_routes(app: FastAPI, get_tado_api):
             if mode_lower == "auto":
                 # Set tracked_mode to 3 (Auto) and HomeKit to 1 (HEAT)
                 tado_api.state_manager.set_zone_tracked_mode(zone_id, 3)
-                # Always set heating_enabled to True when entering Auto mode (override any explicit value)
-                heating_enabled = True
+                # Set heating_enabled to True when entering Auto mode (only if not explicitly set)
+                if heating_enabled is None:
+                    heating_enabled = True
                 switching_to_auto = True
                 logger.info(f"Zone {zone_id} ({zone_name}): Setting to Auto mode (tracked_mode=3)")
                 
@@ -1002,17 +1003,19 @@ def register_routes(app: FastAPI, get_tado_api):
                 char_updates['target_temperature'] = temperature
 
         if heating_enabled is not None:
-            # Get current tracked_mode (may have been updated by mode parameter)
-            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
-            
-            # If in Auto mode (3), always set HomeKit to HEAT (1)
-            # This ensures Auto mode always shows as HEAT to HomeKit
-            if current_tracked_mode == 3:
+            # heating_enabled directly controls HVAC mode (overrides Auto mode)
+            if heating_enabled:
+                # Set HVAC to HEAT (1) and update tracked_mode to HEAT (1)
                 char_updates['target_heating_cooling_state'] = 1
-                logger.debug(f"Zone {zone_id}: Auto mode - setting HomeKit to HEAT (1)")
+                # Update tracked_mode to HEAT (1) - heating_enabled takes precedence over mode
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT and tracked_mode to 1")
             else:
-                # Otherwise, set HomeKit to match heating_enabled
-                char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
+                # Set HVAC to OFF (0) and update tracked_mode to OFF (0)
+                char_updates['target_heating_cooling_state'] = 0
+                # Update tracked_mode to OFF (0) - heating_enabled takes precedence over mode
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
+                logger.debug(f"Zone {zone_id}: heating_enabled=false - setting HVAC to OFF and tracked_mode to 0")
 
         if not char_updates:
             raise HTTPException(status_code=400, detail="No control parameters provided")
