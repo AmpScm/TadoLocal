@@ -445,6 +445,18 @@ class TadoLocalAPI:
                         )
                         if field_name:
                             logger.debug(f"Updated device {accessory['id']} {field_name}: {old_val} -> {new_val}")
+                            
+                            # Sync tracked_mode when TargetHeatingCoolingState changes externally
+                            if field_name == 'target_heating_cooling_state' and is_zone_leader and device_id:
+                                zone_id = device_info.get('zone_id')
+                                if zone_id:
+                                    current_tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+                                    # Update tracked_mode to match external change (0 or 1)
+                                    # If currently in Auto (3), exit Auto mode and match the external change
+                                    new_tracked_mode = int(value)  # value is 0 or 1 from HomeKit
+                                    if current_tracked_mode != new_tracked_mode:
+                                        self.state_manager.set_zone_tracked_mode(zone_id, new_tracked_mode)
+                                        logger.info(f"Zone {zone_id} ({zone_name}): tracked_mode updated from {current_tracked_mode} to {new_tracked_mode} (external change)")
 
             # Skip logging during initialization
             if not self.is_initializing:
@@ -576,6 +588,9 @@ class TadoLocalAPI:
                 if leader_device_id:
                     leader_state = self._build_device_state(leader_device_id)
 
+                    # Get tracked_mode for zone
+                    tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+
                     # Build zone state using zone logic
                     zone_state = {
                         'cur_temp_c': leader_state['cur_temp_c'],
@@ -584,6 +599,7 @@ class TadoLocalAPI:
                         'target_temp_c': leader_state['target_temp_c'],
                         'target_temp_f': leader_state['target_temp_f'],
                         'mode': 0,
+                        'tracked_mode': tracked_mode,
                         'cur_heating': 0
                     }
 

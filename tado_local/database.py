@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS zones (
     zone_type TEXT,
     leader_device_id INTEGER,
     order_id INTEGER,
+    tracked_mode INTEGER DEFAULT 1,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tado_home_id) REFERENCES tado_homes(tado_home_id) ON DELETE CASCADE,
@@ -168,7 +169,7 @@ def ensure_schema_and_migrate(db_path: str):
     # Supported schema version for this codebase. If the database reports a
     # higher user_version we should refuse to start to avoid silent data loss
     # or incompatible assumptions.
-    SUPPORTED_SCHEMA_VERSION = 2
+    SUPPORTED_SCHEMA_VERSION = 3
 
     # Open connection and check current schema version before applying changes
     conn = sqlite3.connect(db_path)
@@ -222,6 +223,41 @@ def ensure_schema_and_migrate(db_path: str):
 
             conn.execute("PRAGMA user_version = 2")
             current_version = 2
+            conn.commit()
+        except Exception:
+            # Rollback any partial changes on error
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+        finally:
+            conn.close()
+    else:
+        conn.close()
+
+    # Re-open connection for next migration check
+    conn = sqlite3.connect(db_path)
+    cursor = conn.execute("PRAGMA user_version")
+    row = cursor.fetchone()
+    current_version = row[0] if row else 0
+
+    # Migration to version 3: add tracked_mode column to zones
+    if current_version < 3:
+        try:
+            # Use explicit transaction to ensure atomic migration
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("ALTER TABLE zones ADD COLUMN tracked_mode INTEGER DEFAULT 1")
+            except Exception:
+                # Column may already exist depending on prior runs
+                pass
+
+            # Initialize existing zones with tracked_mode = 1 (HEAT) if NULL
+            conn.execute("UPDATE zones SET tracked_mode = 1 WHERE tracked_mode IS NULL")
+
+            conn.execute("PRAGMA user_version = 3")
+            current_version = 3
             conn.commit()
         except Exception:
             # Rollback any partial changes on error

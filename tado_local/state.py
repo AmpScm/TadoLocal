@@ -115,13 +115,13 @@ class DeviceStateManager:
         cursor = conn.execute("""
             SELECT z.zone_id, z.name, z.leader_device_id, z.order_id,
                    d.serial_number as leader_serial, d.device_type as leader_type,
-                   d.is_circuit_driver, z.uuid
+                   d.is_circuit_driver, z.uuid, z.tracked_mode
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
-        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, is_circuit_driver, uuid_val in cursor.fetchall():
+        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, is_circuit_driver, uuid_val, tracked_mode in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
@@ -130,7 +130,8 @@ class DeviceStateManager:
                 'leader_serial': leader_serial,
                 'leader_type': leader_type,
                 'is_circuit_driver': bool(is_circuit_driver),
-                'uuid': uuid_val
+                'uuid': uuid_val,
+                'tracked_mode': tracked_mode if tracked_mode is not None else 1  # Default to 1 (HEAT) if NULL
             }
 
         conn.close()
@@ -193,6 +194,38 @@ class DeviceStateManager:
     def get_device_id_by_aid(self, aid: int) -> Optional[int]:
         """Get device_id from HomeKit accessory ID (aid)."""
         return self.aid_to_device_id.get(aid)
+
+    def get_zone_tracked_mode(self, zone_id: int) -> int:
+        """Get tracked_mode for a zone (0=OFF, 1=HEAT, 3=Auto).
+        
+        Returns the tracked_mode from cache, or 1 (HEAT) as default if zone not found.
+        """
+        zone_info = self.zone_cache.get(zone_id)
+        if zone_info:
+            return zone_info.get('tracked_mode', 1)
+        # Fallback: query database if not in cache
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute("SELECT tracked_mode FROM zones WHERE zone_id = ?", (zone_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else 1
+
+    def set_zone_tracked_mode(self, zone_id: int, mode: int) -> None:
+        """Set tracked_mode for a zone (0=OFF, 1=HEAT, 3=Auto).
+        
+        Updates both database and cache.
+        """
+        if mode not in (0, 1, 3):
+            raise ValueError(f"Invalid tracked_mode: {mode}. Must be 0 (OFF), 1 (HEAT), or 3 (Auto)")
+        
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE zones SET tracked_mode = ? WHERE zone_id = ?", (mode, zone_id))
+        conn.commit()
+        conn.close()
+        
+        # Update cache
+        if zone_id in self.zone_cache:
+            self.zone_cache[zone_id]['tracked_mode'] = mode
 
     def get_or_create_device(self, serial_number: str, aid: int, accessory_data: dict) -> int:
         """Get or create device ID for a serial number, updating aid if needed."""

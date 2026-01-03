@@ -523,6 +523,9 @@ def register_routes(app: FastAPI, get_tado_api):
                 cur_temp_f = round(current_temp * 9/5 + 32, 1) if current_temp is not None else None
                 target_temp_f = round(target_temp * 9/5 + 32, 1) if target_temp is not None else None
 
+                # Get tracked_mode from zone cache
+                tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+
                 state_summary = {
                     'cur_temp_c': current_temp,
                     'cur_temp_f': cur_temp_f,
@@ -530,9 +533,12 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_c': target_temp,
                     'target_temp_f': target_temp_f,
                     'mode': mode,
+                    'tracked_mode': tracked_mode,
                     'cur_heating': cur_heating,
                 }
             else:
+                # Get tracked_mode even if zone_state is None
+                tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
                 state_summary = {
                     'cur_temp_c': None,
                     'cur_temp_f': None,
@@ -540,6 +546,7 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_c': None,
                     'target_temp_f': None,
                     'mode': 0,
+                    'tracked_mode': tracked_mode,
                     'cur_heating': 0,
                 }
 
@@ -675,6 +682,9 @@ def register_routes(app: FastAPI, get_tado_api):
             cur_temp_f = round(current_temp * 9/5 + 32, 1) if current_temp is not None else None
             target_temp_f = round(target_temp * 9/5 + 32, 1) if target_temp is not None else None
 
+            # Get tracked_mode from zone cache
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+
             state_summary = {
                 'cur_temp_c': current_temp,
                 'cur_temp_f': cur_temp_f,
@@ -682,9 +692,12 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': target_temp,
                 'target_temp_f': target_temp_f,
                 'mode': mode,
+                'tracked_mode': tracked_mode,
                 'cur_heating': cur_heating,
             }
         else:
+            # Get tracked_mode even if zone_state is None
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
             state_summary = {
                 'cur_temp_c': None,
                 'cur_temp_f': None,
@@ -692,6 +705,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': None,
                 'target_temp_f': None,
                 'mode': 0,
+                'tracked_mode': tracked_mode,
                 'cur_heating': 0,
             }
 
@@ -791,6 +805,7 @@ def register_routes(app: FastAPI, get_tado_api):
         zone_id: int,
         temperature: Optional[float] = None,
         heating_enabled: Optional[bool] = None,
+        mode: Optional[str] = None,
         no_implicit_mode: Optional[bool] = False,
         api_key: Optional[str] = Depends(get_api_key)
         ):
@@ -804,6 +819,7 @@ def register_routes(app: FastAPI, get_tado_api):
                         - 0 = disable heating (without changing target temp)
                         - >= 5 = set temperature and enable heating
             heating_enabled: Enable/disable heating mode (true/false)
+            mode: Set tracked mode - "off" (0), "heat" (1), or "auto" (3)
 
         Returns:
             Success status and applied values
@@ -821,9 +837,11 @@ def register_routes(app: FastAPI, get_tado_api):
             - This allows temporary on/off control without affecting your schedule
             - temperature=-1 is useful for automation: turn on without changing schedule
             - temperature=0 is useful for "away mode": turn off but remember setpoint
+            - mode="auto" sets tracked_mode=3 and HomeKit target_heating_cooling_state=1 (HEAT)
+            - mode="off" or "heat" sets tracked_mode and HomeKit state to match
         """
         # Log the incoming request
-        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled}")
+        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled} mode={mode}")
 
         tado_api = get_tado_api()
         if not tado_api:
@@ -863,6 +881,28 @@ def register_routes(app: FastAPI, get_tado_api):
             raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
 
         zone_name, leader_device_id, leader_serial = row
+
+        # Handle mode parameter
+        if mode is not None:
+            mode_lower = mode.lower()
+            if mode_lower == "auto":
+                # Set tracked_mode to 3 (Auto) and HomeKit to 1 (HEAT)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 3)
+                # Ensure heating_enabled is set to True when entering Auto mode
+                if heating_enabled is None:
+                    heating_enabled = True
+            elif mode_lower == "off":
+                # Set tracked_mode to 0 (OFF) and HomeKit to 0 (OFF)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
+                if heating_enabled is None:
+                    heating_enabled = False
+            elif mode_lower == "heat":
+                # Set tracked_mode to 1 (HEAT) and HomeKit to 1 (HEAT)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                if heating_enabled is None:
+                    heating_enabled = True
+            else:
+                raise HTTPException(status_code=400, detail="mode must be 'off', 'heat', or 'auto'")
 
         if not leader_device_id:
             # No explicit leader assigned - fall back to the first device in the zone
@@ -904,8 +944,15 @@ def register_routes(app: FastAPI, get_tado_api):
                 char_updates['target_temperature'] = temperature
 
         if heating_enabled is not None:
-            # 0 = OFF, 1 = HEAT
-            char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
+            # Get current tracked_mode (may have been updated by mode parameter)
+            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            
+            # If in Auto mode (3), always set HomeKit to HEAT (1)
+            if current_tracked_mode == 3:
+                char_updates['target_heating_cooling_state'] = 1
+            else:
+                # Otherwise, set HomeKit to match heating_enabled
+                char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
 
         if not char_updates:
             raise HTTPException(status_code=400, detail="No control parameters provided")
@@ -945,7 +992,8 @@ def register_routes(app: FastAPI, get_tado_api):
                 'leader_serial': leader_serial,
                 'applied': {
                     'target_temperature': temperature,
-                    'heating_enabled': heating_enabled
+                    'heating_enabled': heating_enabled,
+                    'tracked_mode': tado_api.state_manager.get_zone_tracked_mode(zone_id)
                 }
             }
 
@@ -1504,12 +1552,16 @@ def register_routes(app: FastAPI, get_tado_api):
                                                 break
 
                                     if zone_state:
+                                        # Get tracked_mode for zone
+                                        tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+                                        
                                         # Build simplified state for SSE
                                         state = {
                                             'cur_temp_c': zone_state.get('current_temperature'),
                                             'hum_perc': zone_state.get('humidity'),
                                             'target_temp_c': zone_state.get('target_temperature'),
                                             'mode': zone_state.get('target_heating_cooling_state', 0),
+                                            'tracked_mode': tracked_mode,
                                             'cur_heating': zone_state.get('current_heating_cooling_state', 0),
                                             'battery_low': zone_state.get('battery_low', False)
                                         }
