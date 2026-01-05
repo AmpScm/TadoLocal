@@ -71,5 +71,12 @@ setup(
         ],
     },
     include_package_data=True,
+    package_data={
+        "tado_local": [
+            "static/*.html",
+            "static/*.svg",
+            "static/*.txt",
+        ],
+    },
     zip_safe=False,
 )
