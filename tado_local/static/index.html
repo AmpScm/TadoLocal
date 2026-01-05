@@ -536,8 +536,8 @@
 
         <div class="footer">
             <div>
-                <a href="api">API Details</a>
-                <a href="docs">API Docs</a>
+                <a href="/api">API Details</a>
+                <a href="/docs">API Docs</a>
             </div>
             <div class="version-info">
                 Powered by <a href="https://github.com/ampscm/TadoLocal" target="_blank" rel="noopener">Tado Local</a> <span id="version-number">...</span>
@@ -740,7 +740,7 @@
                 const startTime = endTime - (hours * 3600);
                 
                 // Fetch history data
-                const response = await fetch(`zones/${zoneId}/history?start_time=${startTime}&end_time=${endTime}&limit=1000`);
+                const response = await fetch(`/zones/${zoneId}/history?start_time=${startTime}&end_time=${endTime}&limit=1000`);
                 if (!response.ok) throw new Error('Failed to load history');
                 
                 const data = await response.json();
@@ -961,7 +961,7 @@
         // Load zones
         async function loadZones() {
             try {
-                const response = await fetch('zones');
+                const response = await fetch('/zones');
                 if (!response.ok) throw new Error('Failed to load zones');
                 
                 const data = await response.json();
@@ -1291,7 +1291,7 @@
             }
 
             try {
-                const response = await fetch(`zones/${currentZone.zone_id}/set?${params}`, {
+                const response = await fetch(`/zones/${currentZone.zone_id}/set?${params}`, {
                     method: 'POST'
                 });
 
@@ -1342,7 +1342,7 @@
                 eventSource.close();
             }
 
-            eventSource = new EventSource('events?types=zone');
+            eventSource = new EventSource('/events?types=zone');
             
             eventSource.onmessage = (event) => {
                 try {
@@ -1455,7 +1455,7 @@
             
             try {
                 // Get schedule type
-                const typeResponse = await fetch(`zones/${currentZone.zone_id}/schedules/type`);
+                const typeResponse = await fetch(`/zones/${currentZone.zone_id}/schedules/type`);
                 if (typeResponse.ok) {
                     const typeData = await typeResponse.json();
                     schedulerType = typeData.schedule_type;
@@ -1468,7 +1468,7 @@
                 }
                 
                 // Get schedules
-                const response = await fetch(`zones/${currentZone.zone_id}/schedules`);
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules`);
                 if (!response.ok) throw new Error('Failed to load schedules');
                 
                 const data = await response.json();
@@ -1547,7 +1547,7 @@
         // Toggle schedule enabled state
         async function toggleSchedule(scheduleId, enabled) {
             try {
-                const response = await fetch(`zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ enabled })
@@ -1564,7 +1564,7 @@
             if (!confirm('Delete this schedule?')) return;
             
             try {
-                const response = await fetch(`zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules/${scheduleId}`, {
                     method: 'DELETE'
                 });
                 if (!response.ok) throw new Error('Failed to delete schedule');
@@ -1720,7 +1720,7 @@
                         return;
                     }
                     
-                    response = await fetch(`zones/${currentZone.zone_id}/schedules/${editingScheduleId}`, {
+                    response = await fetch(`/zones/${currentZone.zone_id}/schedules/${editingScheduleId}`, {
                         method: 'PUT',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify(updateData)
@@ -1734,7 +1734,7 @@
                     if (dayOfWeek !== null) params.append('day_of_week', dayOfWeek);
                     if (dayType !== null) params.append('day_type', dayType);
                     
-                    response = await fetch(`zones/${currentZone.zone_id}/schedules?${params}`, {
+                    response = await fetch(`/zones/${currentZone.zone_id}/schedules?${params}`, {
                         method: 'POST'
                     });
                 }
@@ -1773,7 +1773,7 @@
             if (!confirm('Clear all schedules for this zone?')) return;
             
             try {
-                const response = await fetch(`zones/${currentZone.zone_id}/schedules`, {
+                const response = await fetch(`/zones/${currentZone.zone_id}/schedules`, {
                     method: 'DELETE'
                 });
                 if (!response.ok) throw new Error('Failed to clear schedules');
