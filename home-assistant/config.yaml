@@ -1,0 +1,18 @@
+name: "TadoLocal Server"
+description: "TadoLocal Server, based on AmpScm/TadoLocal"
+version: "0.1.0"
+slug: "tado-local-server"
+url: "https://github.com/AmpScm/TadoLocal"
+init: false
+arch:
+  - amd64
+  - armhf
+  - armv7
+ports:
+  4407/tcp: 4407
+options:
+  bridge_ip: "1.2.3.4"
+  bridge_pin: "123-45-678"
+schema:
+  bridge_ip: str
+  bridge_pin: str 
