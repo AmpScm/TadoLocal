@@ -200,7 +200,7 @@ class TadoCloudAPI:
     AUTH_BASE_URL = "https://login.tado.com/oauth2"
     API_BASE_URL = "https://my.tado.com/api/v2"
     CLIENT_ID = "1bb50063-6b0c-4d11-bd99-387f4a91cc46"
-    
+
     # User-Agent for API identification and communication channel
     USER_AGENT = f"TadoLocal/{__version__} (+https://github.com/ampscm/TadoLocal)"
 
@@ -650,6 +650,11 @@ class TadoCloudAPI:
                                                    zones_data=zones,
                                                    zone_states_data=zone_states,
                                                    devices_data=devices):
+                                # Reload caches to pick up any changes (especially zone/device creation)
+                                if self.tado_api and self.tado_api.state_manager:
+                                    self.tado_api.state_manager._load_device_cache()
+                                    self.tado_api.state_manager._load_zone_cache()
+
                                 # Calculate next sync time (use shorter of the two intervals)
                                 next_dynamic_in = dynamic_interval - (time.time() - last_dynamic_sync)
                                 next_static_in = static_interval - (time.time() - last_static_sync)

@@ -1679,8 +1679,9 @@ def register_routes(app: FastAPI, get_tado_api):
 
                 result['refreshed'] = ['home_info', 'zones', 'battery_status', 'device_status']
 
-            # Reload device cache to pick up changes
+            # Reload both device and zone caches to pick up changes
             tado_api.state_manager._load_device_cache()
+            tado_api.state_manager._load_zone_cache()
 
             result['success'] = True
             result['timestamp'] = time.time()
