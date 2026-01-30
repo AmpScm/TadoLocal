@@ -1,0 +1,15 @@
+# Development dependencies for TadoLocal
+# Install with: pip install -r requirements-dev.txt
+
+# Testing
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-cov>=4.0.0
+
+# Linting and code quality
+ruff>=0.1.0
+flake8>=6.0.0
+
+# Build tools
+build>=0.10.0
+twine>=4.0.0

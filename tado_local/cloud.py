@@ -650,6 +650,11 @@ class TadoCloudAPI:
                                                    zones_data=zones,
                                                    zone_states_data=zone_states,
                                                    devices_data=devices):
+                                # Reload caches to pick up any changes (especially zone/device creation)
+                                if self.tado_api and self.tado_api.state_manager:
+                                    self.tado_api.state_manager._load_device_cache()
+                                    self.tado_api.state_manager._load_zone_cache()
+
                                 # Calculate next sync time (use shorter of the two intervals)
                                 next_dynamic_in = dynamic_interval - (time.time() - last_dynamic_sync)
                                 next_static_in = static_interval - (time.time() - last_static_sync)
