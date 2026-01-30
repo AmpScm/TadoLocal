@@ -178,8 +178,8 @@ async def run_server(args):
                 logger.warning("mDNS registration scheduler unavailable: %s", e)
         else:
             logger.info("mDNS registration disabled by --no-mdns flag")
-            
-        
+
+
         server_ip = get_primary_ipv4() or "0.0.0.0"
 
         logger.info( "*** Tado Local ready! ***")

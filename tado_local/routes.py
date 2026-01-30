@@ -469,7 +469,7 @@ def register_routes(app: FastAPI, get_tado_api):
             leader_type = zone_info['leader_type']
             is_circuit_driver = zone_info['is_circuit_driver']
             tado_zone_id = zone_info['tado_zone_id']
-    
+
             # Get device count for this zone (quick loop through device cache)
             device_count = sum(1 for dev_info in tado_api.state_manager.device_info_cache.values()
                               if dev_info.get('zone_id') == zone_id)
