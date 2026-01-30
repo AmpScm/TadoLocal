@@ -57,12 +57,12 @@ def resolve_zone_names(zone_specs):
         List of zone IDs (int)
     """
     global zone_info
-    
+
     if not zone_info:
         zone_info, _ = get_zones_and_homes()
-    
+
     resolved = []
-    
+
     for spec in zone_specs:
         if isinstance(spec, int):
             # Already an ID
@@ -71,7 +71,7 @@ def resolve_zone_names(zone_specs):
             # Try to find by name (case-insensitive partial match)
             spec_lower = spec.lower()
             matched = False
-            
+
             for zone in zone_info:
                 zone_name_lower = zone['name'].lower()
                 if spec_lower in zone_name_lower or zone_name_lower in spec_lower:
@@ -80,11 +80,11 @@ def resolve_zone_names(zone_specs):
                     if verbose > 0:
                         print(f"Matched zone name '{spec}' to '{zone['name']}' (ID: {zone['zone_id']})")
                     break
-            
+
             if not matched:
                 print(f"Error: No zone found matching '{spec}'")
                 sys.exit(1)
-    
+
     return resolved
 
 
@@ -389,7 +389,7 @@ def main(argv):
                 parsed_specs.append(int(spec))
             except ValueError:
                 parsed_specs.append(spec)
-        
+
         zones = resolve_zone_names(parsed_specs)
 
     # Determine if we should list zones

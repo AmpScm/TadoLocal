@@ -33,6 +33,7 @@ from .bridge import TadoBridge
 from .api import TadoLocalAPI
 from .cloud import TadoCloudAPI
 from .routes import create_app, register_routes
+from .zeroconf_register import get_primary_ipv4
 
 # Logger will be configured in main() based on daemon/console mode
 logger = logging.getLogger(__name__)
@@ -135,7 +136,6 @@ async def run_server(args):
                 logger.debug("Attempting to import zeroconf_register for mDNS registration")
                 from .zeroconf_register import register_service_async
                 logger.info("mDNS registration helper loaded")
-
                 async def _schedule_mdns():
                     # Register a single HTTP service so basic clients can discover the API.
                     # We intentionally publish only the HTTP service to avoid duplicate
@@ -145,14 +145,14 @@ async def run_server(args):
                         from .__version__ import __version__ as tado_version
                         # Do not advertise the bridge IP here; advertise the daemon host
                         # so clients connect to this service instance to manage Tado.
-                        ok, method, msg = await register_service_async(name='tado-local', port=args.port, props={
+                        ok, method, msg, server_ip = await register_service_async(name='tado-local', port=args.port, props={
                             'path': '/',
                             'version': tado_version,
                             'app': 'tado-local',
                             'id': 'tado-local'
                         }, service_type='_http._tcp.local.')
                         if ok:
-                            logger.info(f"HTTP mDNS service registered via {method} (advertising daemon host A/AAAA records)")
+                            logger.info(f"HTTP mDNS service registered via {method} (advertising daemon host A/AAAA records on {server_ip})")
                         else:
                             logger.warning(f"HTTP mDNS registration: {msg} (advertising daemon host)")
                     except Exception as e:
@@ -179,13 +179,16 @@ async def run_server(args):
         else:
             logger.info("mDNS registration disabled by --no-mdns flag")
 
+
+        server_ip = get_primary_ipv4() or "0.0.0.0"
+
         logger.info( "*** Tado Local ready! ***")
         logger.info(f"Bridge IP: {bridge_ip}")
-        logger.info(f"API Server: http://0.0.0.0:{args.port}")
-        logger.info(f"Documentation: http://0.0.0.0:{args.port}/docs")
-        logger.info(f"Status: http://0.0.0.0:{args.port}/status")
-        logger.info(f"Thermostats: http://0.0.0.0:{args.port}/thermostats")
-        logger.info(f"Live Events: http://0.0.0.0:{args.port}/events")
+        logger.info(f"API Server: http://{server_ip}:{args.port}")
+        logger.info(f"Documentation: http://{server_ip}:{args.port}/docs")
+        logger.info(f"Status: http://{server_ip}:{args.port}/status")
+        logger.info(f"Thermostats: http://{server_ip}:{args.port}/thermostats")
+        logger.info(f"Live Events: http://{server_ip}:{args.port}/events")
 
         # Configure uvicorn logging to match our format and prevent duplicates
         if args.syslog:
@@ -265,7 +268,7 @@ async def run_server(args):
                     "uvicorn.access": {"handlers": ["access"], "level": "INFO", "propagate": False},
                 },
             }
-        
+
         # Start the FastAPI server
         config = uvicorn.Config(
             app,
@@ -407,7 +410,7 @@ API Endpoints:
                        help="Enable verbose logging (DEBUG level)")
     parser.add_argument("--daemon", action="store_true",
                        help="Run in daemon mode (structured logging for syslog, auto-enables --pid-file)")
-    parser.add_argument("--syslog", 
+    parser.add_argument("--syslog",
                        help="Send logs to syslog instead of stdout (e.g., /dev/log, localhost:514, or remote.server:514)")
     parser.add_argument("--pid-file",
                        help="Write process ID to specified file (useful for daemon mode)")

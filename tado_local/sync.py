@@ -262,23 +262,23 @@ class TadoCloudSync:
         Returns:
             True if successful
         """
-       
+
         try:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
             humidity_updates = 0
-            
+
             zones = zone_states_data.get('zoneStates', {})
             for zone_id, zone_state in zones.items():
                 settings = zone_state.get('setting', {})
 
                 if not settings or settings.get('type') == 'HOT_WATER':
                     continue  # Do not process HOT_WATER zones for now
-            
+
                 sensoDataPoints = zone_state.get('sensorDataPoints', {})
                 humidity = str(sensoDataPoints.get('humidity', {}).get('percentage'))
-                
+
                 if humidity != "None":
                     logger.debug(f"Get all aids for zone: {zone_id}")
                     # Get all devices of this zone to generate update humidity
