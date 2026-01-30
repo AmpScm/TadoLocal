@@ -4,7 +4,6 @@ from pathlib import Path
 import tempfile
 from unittest.mock import AsyncMock
 from fastapi.testclient import TestClient
-#from fastapi import FastAPI
 
 from tado_local.database import ensure_schema_and_migrate
 

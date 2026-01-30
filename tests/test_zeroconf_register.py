@@ -18,7 +18,7 @@ async def test_register_service_async_success(monkeypatch):
     # Patch the imports inside the function
     with patch('tado_local.zeroconf_register.AsyncZeroconf', MagicMock(return_value=mock_async_zc), create=True):
         with patch('tado_local.zeroconf_register.ServiceInfo', return_value=mock_service_info, create=True):
-            ok, method, msg = await zeroconf_register.register_service_async(
+            ok, method, msg, ip = await zeroconf_register.register_service_async(
                 name='tado-local-test',
                 port=4407,
                 props={'path': '/'}
