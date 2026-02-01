@@ -1,0 +1,4 @@
+include LICENSE
+include README.md
+recursive-include tado_local/static *
+recursive-include domoticz *.py

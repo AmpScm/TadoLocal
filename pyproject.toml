@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tado-local"
+version = "1.0.0a1"
+description = "Tado-Local - Exposing Tado as local API"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [ { name = "AmpScm" } ]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+]
+
+dependencies = [
+  "aiohomekit>=3.0.0",
+  "fastapi>=0.100.0",
+  "uvicorn[standard]>=0.23.0",
+  "cryptography>=41.0.0",
+  "zeroconf>=0.115.0",
+  "aiohttp>=3.9.0",
+  "dbus-next>=0.2.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/AmpScm/tado-local"
+Repository = "https://github.com/AmpScm/tado-local.git"
+
+[tool.black]
+line-length = 150
+target-version = ['py313']
+skip-string-normalization = true
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["tado_local", "domoticz"]
+
+[tool.setuptools.package-data]
+tado_local = ["static/*"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::DeprecationWarning:lark.utils",
+]
+markers = [
+    "asyncio: marks tests as async (deselect with '-m \"not asyncio\"')",
+]
+
+[tool.ruff]
+exclude = ["domoticz/"]
+select = ["E", "W", "F"]

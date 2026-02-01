@@ -90,11 +90,12 @@ class DeviceStateManager:
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute("""
          SELECT d.device_id, d.serial_number, d.aid, d.name, d.device_type,
-             d.zone_id, z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, d.battery_state
+             d.zone_id, z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, d.battery_state,
+             z.tado_zone_id
          FROM devices d
          LEFT JOIN zones z ON d.zone_id = z.zone_id
         """)
-        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, battery_state in cursor.fetchall():
+        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, battery_state, tado_zone_id in cursor.fetchall():
             self.device_id_cache[serial_number] = device_id
             if aid:
                 self.aid_to_device_id[aid] = device_id
@@ -105,6 +106,7 @@ class DeviceStateManager:
                 'device_type': device_type,
                 'zone_id': zone_id,
                 'zone_name': zone_name,
+                'tado_zone_id': tado_zone_id,
                 'is_zone_leader': bool(is_zone_leader),
                 'is_circuit_driver': bool(is_circuit_driver),
                 'battery_state': battery_state  # From Cloud API: "NORMAL", "LOW", etc.
@@ -118,18 +120,20 @@ class DeviceStateManager:
         cursor = conn.execute("""
             SELECT z.zone_id, z.name, z.leader_device_id, z.order_id,
                    d.serial_number as leader_serial, d.device_type as leader_type,
+                   z.tado_zone_id, 
                    d.is_circuit_driver, z.uuid, z.tracked_mode
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
-        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, is_circuit_driver, uuid_val, tracked_mode in cursor.fetchall():
+        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val, tracked_mode in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
                 'leader_device_id': leader_device_id,
                 'order_id': order_id,
+                'tado_zone_id': tado_zone_id,
                 'leader_serial': leader_serial,
                 'leader_type': leader_type,
                 'is_circuit_driver': bool(is_circuit_driver),
@@ -652,15 +656,33 @@ class DeviceStateManager:
             logger.debug(f"Cleared scheduled change flag for zone {zone_id}")
 
     def get_all_devices(self) -> List[Dict]:
-        """Get all registered devices."""
+        """Get all registered devices with full details including zone information."""
         conn = sqlite3.connect(self.db_path)
+        
         cursor = conn.execute("""
-            SELECT device_id, serial_number, aid, device_type, name, model, manufacturer,
-                   first_seen, last_seen
-            FROM devices
+            SELECT d.device_id, d.serial_number, d.aid, d.device_type, d.name, 
+                    d.model, d.manufacturer, d.firmware_version, d.zone_id, 
+                    z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, 
+                    d.first_seen, d.last_seen 
+            FROM devices d
+            LEFT JOIN zones z ON d.zone_id = z.zone_id
             ORDER BY device_id
         """)
-        columns = [desc[0] for desc in cursor.description]
-        devices = [dict(zip(columns, row)) for row in cursor.fetchall()]
+        
+        # Extract column names from cursor metadata
+        column_names = [desc[0] for desc in cursor.description]
+
+        # Convert each row to a dictionary with column names as keys 
+        # (convert 'is_zone_leader' and 'is_circuit_driver' to  bool type)
+        devices = []
+        for row in cursor.fetchall():
+            row = list(row)
+            row[column_names.index('is_zone_leader')] = bool(row[column_names.index('is_zone_leader')])
+            row[column_names.index('is_circuit_driver')] = bool(row[column_names.index('is_circuit_driver')])
+            device_dict = dict(zip(column_names, row))
+            devices.append(device_dict)
         conn.close()
+
         return devices
+        
+            

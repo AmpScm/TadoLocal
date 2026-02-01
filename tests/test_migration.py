@@ -1,6 +1,4 @@
-import os
 import sqlite3
-import tempfile
 
 from tado_local.database import ensure_schema_and_migrate
 

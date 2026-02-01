@@ -1,82 +1,23 @@
-"""Setup configuration for Tado Local."""
-#
-# Copyright 2025 The TadoLocal and AmpScm contributors.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#    http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
+"""Setup configuration for Tado Local.
 
-from setuptools import setup, find_packages
+Configuration is primarily defined in pyproject.toml.
+This file provides custom version discovery from __version__.py.
+"""
+
+from setuptools import setup
 from pathlib import Path
 import re
 
-# Read version without importing the package (to avoid dependency issues during setup)
-version_file = Path(__file__).parent / "tado_local" / "__version__.py"
-version_content = version_file.read_text(encoding="utf-8")
-version_match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]*)[\'"]', version_content, re.MULTILINE)
-if not version_match:
-    raise RuntimeError("Unable to find version string in __version__.py")
-__version__ = version_match.group(1)
+def get_version():
+    """Read version from tado_local/__version__.py"""
+    version_file = Path(__file__).parent / "tado_local" / "__version__.py"
+    content = version_file.read_text(encoding="utf-8")
+    match = re.search(r'^__version__\s*=\s*[\'"]([^\'"]+)[\'"]', content, re.MULTILINE)
+    if match:
+        return match.group(1)
+    raise RuntimeError("Unable to find __version__ in tado_local/__version__.py")
 
-# Read the README file
-readme_file = Path(__file__).parent / "README.md"
-long_description = readme_file.read_text(encoding="utf-8") if readme_file.exists() else ""
+# Use custom version discovery
+setup(version=get_version())
 
-# Read requirements
-requirements_file = Path(__file__).parent / "requirements.txt"
-requirements = []
-if requirements_file.exists():
-    requirements = [
-        line.strip()
-        for line in requirements_file.read_text(encoding="utf-8").splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
 
-setup(
-    name="tado-local",
-    version=__version__,
-    author="Tado Local Contributors",
-    description="REST API for Tado devices via HomeKit bridge",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/ampscm/TadoLocal",
-    packages=find_packages(),
-    classifiers=[
-        "Development Status :: 3 - Alpha",
-        "Intended Audience :: Developers",
-        "License :: OSI Approved :: Apache Software License",
-        "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.11",
-        "Programming Language :: Python :: 3.12",
-        "Topic :: Home Automation",
-        "Topic :: Software Development :: Libraries :: Python Modules",
-    ],
-    python_requires=">=3.11",
-    install_requires=requirements,
-    extras_require={
-        # Optional Avahi/dbus support for platforms that provide dbus-next
-        'avahi': ['dbus-next>=0.6.0'],
-    },
-    entry_points={
-        "console_scripts": [
-            "tado-local=tado_local.__main__:main",
-        ],
-    },
-    include_package_data=True,
-    package_data={
-        "tado_local": [
-            "static/*.html",
-            "static/*.svg",
-            "static/*.txt",
-        ],
-    },
-    zip_safe=False,
-)

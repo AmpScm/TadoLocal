@@ -32,7 +32,6 @@ from aiohomekit.controller.ip.pairing import IpPairing
 from aiohomekit.controller.ip.controller import IpController
 from aiohomekit.protocol import perform_pair_setup_part1, perform_pair_setup_part2
 from aiohomekit.utils import check_pin_format, pair_with_auth
-from aiohomekit.controller import Controller
 
 # zeroconf import kept for initial pairing only - not needed for normal operation
 from zeroconf.asyncio import AsyncZeroconf
@@ -247,7 +246,7 @@ class TadoBridge:
                     state_machine = perform_pair_setup_part1(pair_with_auth(feature_flags))
                     request, expected = state_machine.send(None)
 
-                    logger.debug(f"Sending pair-setup request...")
+                    logger.debug("Sending pair-setup request...")
                     response = await connection.post_tlv(
                         "/pair-setup",
                         body=request,
@@ -299,7 +298,7 @@ class TadoBridge:
                                 logger.info(f"Part 2 successful with approach {approach_name}, feature flags {feature_flags}")
 
                                 # If we get here, pairing succeeded!
-                                logger.info(f"*** PAIRING SUCCESS! ***")
+                                logger.info("*** PAIRING SUCCESS! ***")
                                 logger.info(f"Successful approach: {approach_name}")
                                 logger.info(f"Feature flags: {feature_flags}")
                                 logger.info(f"Controller ID: {controller_id}")
@@ -397,12 +396,12 @@ class TadoBridge:
                 selected_bridge_ip = all_pairings[0][0]
                 logger.info(f"Auto-selected the only existing pairing: {selected_bridge_ip}")
             elif len(all_pairings) > 1:
-                logger.error(f"Multiple pairings found. Please specify --bridge-ip with one of:")
+                logger.error("Multiple pairings found. Please specify --bridge-ip with one of:")
                 for ip, _ in all_pairings:
                     logger.error(f"   --bridge-ip {ip}")
                 raise RuntimeError("Multiple pairings available. Please specify --bridge-ip.")
             else:
-                logger.info(f"No existing pairings found.")
+                logger.info("No existing pairings found.")
 
         # If we have existing pairing data, test it first
         if pairing_data is not None:
@@ -434,8 +433,8 @@ class TadoBridge:
 
             except Exception as e:
                 logger.error(f"Failed to connect to existing pairing: {e}")
-                logger.warning(f"Connection failed, but keeping pairing data (may be temporary network issue)")
-                logger.info(f"To force re-pairing, delete the pairing manually or use --pin to create a new one")
+                logger.warning("Connection failed, but keeping pairing data (may be temporary network issue)")
+                logger.info("To force re-pairing, delete the pairing manually or use --pin to create a new one")
 
                 # DO NOT remove the pairing data automatically - it might just be a temporary issue
                 # conn.execute("DELETE FROM pairings WHERE bridge_ip = ?", (selected_bridge_ip,))

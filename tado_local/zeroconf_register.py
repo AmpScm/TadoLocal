@@ -4,14 +4,12 @@ This module implements a single, predictable path: AsyncZeroconf. It logs
 parameters, success and failures so runtime issues are easy to see.
 """
 from typing import Dict, Optional
-import asyncio
 import logging
 
 logger = logging.getLogger(__name__)
 
 # module-level registration handle: ('async', async_zc, info)
 _reg = None
-_preferred_method = None
 
 
 def _props_to_txt(props: Dict[str, str]):
