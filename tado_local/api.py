@@ -61,6 +61,7 @@ class TadoLocalAPI:
         # Cleanup tracking
         self.subscribed_characteristics: List[tuple[int, int]] = []
         self.background_tasks: List[asyncio.Task] = []
+        self.window_close_timers: Dict[int, asyncio.Task] = {}
         self.is_shutting_down = False
 
     async def initialize(self, pairing: IpPairing):
@@ -77,6 +78,15 @@ class TadoLocalAPI:
         """Clean up resources and unsubscribe from events."""
         logger.info("Starting cleanup...")
         self.is_shutting_down = True
+
+        # Cancel window recheck tasks
+        if self.window_close_timers:
+            logger.info(f"Cancelling {len(self.window_close_timers)} window closing timers")
+            for task in self.window_close_timers.values():
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(*self.window_close_timers.values(), return_exceptions=True)
+            self.window_close_timers.clear()
 
         # Cancel all background tasks
         if self.background_tasks:
@@ -467,6 +477,8 @@ class TadoLocalAPI:
 
                 # Format log message: show zone name, only add device detail if not zone leader
                 if is_zone_leader:
+                    # Check for window open/close based on leader updates
+                    self._handle_window_open_detection(device_id, device_info, char_type)  
                     # Zone leader - just show zone name
                     logger.info(f"[{src}] {zone_name} | {char_name}: {last_value} -> {value}")
                 else:
@@ -484,6 +496,117 @@ class TadoLocalAPI:
         except Exception as e:
             logger.error(f"Error handling unified change: {e}")
 
+    def _handle_window_open_detection(self, device_id, device_info, char_type):
+        """Detect window open/close based on leader device temperature update."""
+        try:
+            # Only check for window open/close if the characteristic is relevant (temperature changes in leader)
+            if char_type.lower() in [DeviceStateManager.CHAR_CURRENT_TEMPERATURE]:
+                # Get current state for leader device
+                leader_state = self.state_manager.get_current_state(device_id)
+                if not leader_state:
+                    # No state info available
+                    return
+
+                zone_name = device_info.get('zone_name', 'No Zone')
+                
+                # Simple heuristic: if temperature drops significantly within time threshold, a window open is asumed
+                temp_drop_threshold = 2.0  # degrees Celsius
+                temp_drop_time_threshold = 10  # minutes
+
+                # Get old values from database of the last temp_drop_time_threshold minutes to compare trends
+                history =  self.state_manager.get_device_history_info(device_id, age=temp_drop_time_threshold)
+                
+                # history structure: history_count, earliest_entry (temp, window, window_lastupdate), latest_entry (temp, window, window_lastupdate)
+                if not history or history['history_count'] < 1:
+                    # No data, just ignore
+                    return
+                
+                # calculate time difference from latest entry to see how long the window has been open/closed/rest
+                time_diff = (time.time() - int(history['latest_entry'][2])) // 60
+                current_window_state = leader_state.get('window')
+                
+                # If window is currently open (1) and has been open for longer than the open time threshold, set it to rest (2)
+                if current_window_state == 1 and time_diff > device_info.get('window_open_time', 15):
+                    logger.info(f"[Window] {zone_name} | Window set to close again, being open over {time_diff:.0f} mins")
+                    # Consider it closed again -> put in rest (2) state to avoid rapid open/close detection
+                    self.state_manager.update_device_window_status(device_id, 2)  
+                    self._cancel_window_close_timer(device_id)
+                    return
+
+                if history['history_count'] < 2:
+                    # Temperature drop is to slow to call it an open window
+                    logger.info(f"[Window] {zone_name} | Not enough history (only {history['history_count']} entry in last {temp_drop_time_threshold} minutes)")
+                    return  
+                
+                temp_drop = history['earliest_entry'][0] - history['latest_entry'][0]
+                logger.info(f"[Window] {zone_name} | Window status {current_window_state} for {time_diff:.0f} mins | Temp drop {temp_drop:.1f}")
+
+                # check if window is currently closed (0) or in rest (2) long enough to consider it closed again
+                if current_window_state == 0  or (current_window_state == 2 and time_diff > device_info.get('window_rest_time', 15)):
+                    window_status = 1 if temp_drop >= temp_drop_threshold else 0
+
+                    # Update state manager with window status
+                    self.state_manager.update_device_window_status(device_id, window_status)
+
+                    # If window is set open (1), schedule a timer to close it again after 'window_open_time' minutes
+                    if window_status == 1:
+                        window_close_delay = device_info.get('window_open_time', 30)
+                        self._schedule_window_close_timer(device_id, window_close_delay, device_info)
+
+        except Exception as e:
+            logger.error(f"Error in window open detection: {e}")
+            import traceback
+            print(traceback.format_exc())
+
+    def _schedule_window_close_timer(self, device_id: int, window_close_delay: int, device_info: Dict[str, Any]):
+        """" Schedule a timer to set the window status back to closed after a delay."""
+        if self.is_shutting_down:
+            return
+
+        existing_task = self.window_close_timers.get(device_id)
+        if existing_task and not existing_task.done():
+            existing_task.cancel()
+
+        task = asyncio.create_task(self._window_close_handler(device_id, device_info, window_close_delay))
+        self.window_close_timers[device_id] = task
+        task.add_done_callback(lambda t: self._window_close_timer_stop(device_id, t))
+
+    def _cancel_window_close_timer(self, device_id: int):
+        """ Cancel any existing window close timer for the device."""
+        task = self.window_close_timers.pop(device_id, None)
+        if task and not task.done():
+            task.cancel()
+
+    def _window_close_timer_stop(self, device_id: int, task: asyncio.Task):
+        """ Callback to clean up after window close timer finishes or is cancelled."""
+        if self.window_close_timers.get(device_id) is task:
+            del self.window_close_timers[device_id]
+
+    async def _window_close_handler(self, device_id: int, device_info: Dict[str, Any], closing_delay: int):
+        """ Wait for the specified delay and then set the window status back to closed if it's still open."""
+        interval = closing_delay * 60
+
+        try:
+            await asyncio.sleep(interval)
+            if self.is_shutting_down:
+                return
+
+            current_state = self.state_manager.get_current_state(device_id)
+            if not current_state or current_state.get('window') != 1:
+                return
+
+            zone_name = device_info.get('zone_name', 'No Zone')
+            logger.info(f"[Window] {zone_name} | Window set to close again")
+            # Consider it closed again -> put in rest state (2) to avoid rapid open/close detection
+            self.state_manager.update_device_window_status(device_id, 2)  
+
+        except asyncio.CancelledError:
+            return
+        except Exception as e:
+            logger.error(f"Window closing error for device {device_id}: {e}")
+            return
+
+            
     async def broadcast_event(self, event_data):
         """Broadcast change event to all connected SSE clients."""
         try:
@@ -545,6 +668,7 @@ class TadoLocalAPI:
             'cur_heating': 1 if state.get('current_heating_cooling_state') == 1 else 0,
             'valve_position': state.get('valve_position'),
             'battery_low': battery_low,
+            'window': state.get('window'),
         }
 
     async def broadcast_state_change(self, device_id: int, zone_name: str):
@@ -595,7 +719,8 @@ class TadoLocalAPI:
                         'target_temp_c': leader_state['target_temp_c'],
                         'target_temp_f': leader_state['target_temp_f'],
                         'mode': 0,
-                        'cur_heating': 0
+                        'cur_heating': 0,
+                        'window_open': leader_state['window'] == 1,
                     }
 
                     # Apply circuit driver logic for heating states (using cache)

@@ -88,11 +88,11 @@ class DeviceStateManager:
         cursor = conn.execute("""
          SELECT d.device_id, d.serial_number, d.aid, d.name, d.device_type,
              d.zone_id, z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, d.battery_state,
-             z.tado_zone_id
+             z.tado_zone_id, z.window_open_time, z.window_rest_time
          FROM devices d
          LEFT JOIN zones z ON d.zone_id = z.zone_id
         """)
-        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, battery_state, tado_zone_id in cursor.fetchall():
+        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, battery_state, tado_zone_id, window_open_time, window_rest_time in cursor.fetchall():
             self.device_id_cache[serial_number] = device_id
             if aid:
                 self.aid_to_device_id[aid] = device_id
@@ -106,7 +106,9 @@ class DeviceStateManager:
                 'tado_zone_id': tado_zone_id,
                 'is_zone_leader': bool(is_zone_leader),
                 'is_circuit_driver': bool(is_circuit_driver),
-                'battery_state': battery_state  # From Cloud API: "NORMAL", "LOW", etc.
+                'battery_state': battery_state,  # From Cloud API: "NORMAL", "LOW", etc.
+                'window_open_time': window_open_time,  # minutes to consider window open after detection
+                'window_rest_time': window_rest_time,  # minutes to wait after window closes before resuming normal operation
             }
         conn.close()
         logger.info(f"Loaded {len(self.device_id_cache)} devices from cache")
@@ -118,13 +120,14 @@ class DeviceStateManager:
             SELECT z.zone_id, z.name, z.leader_device_id, z.order_id,
                    d.serial_number as leader_serial, d.device_type as leader_type,
                    z.tado_zone_id, 
-                   d.is_circuit_driver, z.uuid
+                   d.is_circuit_driver, z.uuid,
+                   z.window_open_time, z.window_rest_time                        
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
-        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val in cursor.fetchall():
+        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val, window_open_time, window_rest_time in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
@@ -134,7 +137,9 @@ class DeviceStateManager:
                 'leader_serial': leader_serial,
                 'leader_type': leader_type,
                 'is_circuit_driver': bool(is_circuit_driver),
-                'uuid': uuid_val
+                'uuid': uuid_val,
+                'window_open_time': window_open_time, 
+                'window_rest_time': window_rest_time
             }
 
         conn.close()
@@ -151,7 +156,8 @@ class DeviceStateManager:
                    current_heating_cooling_state, target_heating_cooling_state,
                    heating_threshold_temperature, cooling_threshold_temperature,
                    temperature_display_units, battery_level, status_low_battery,
-                   humidity, target_humidity, active_state, valve_position
+                   humidity, target_humidity, active_state, valve_position,
+                   window, window_lastupdate
             FROM device_state_history
             WHERE (device_id, timestamp_bucket) IN (
                 SELECT device_id, MAX(timestamp_bucket)
@@ -179,6 +185,8 @@ class DeviceStateManager:
                 'target_humidity': row[12],
                 'active_state': row[13],
                 'valve_position': row[14],
+                'window': row[15],
+                'window_lastupdate': row[16],
             }
 
             # Set the last saved bucket
@@ -362,7 +370,8 @@ class DeviceStateManager:
             'current_heating_cooling_state', 'target_heating_cooling_state',
             'heating_threshold_temperature', 'cooling_threshold_temperature',
             'temperature_display_units', 'battery_level', 'status_low_battery',
-            'humidity', 'target_humidity', 'active_state', 'valve_position'
+            'humidity', 'target_humidity', 'active_state', 'valve_position',
+            'window'
         ]
 
         for field in data_fields:
@@ -394,8 +403,9 @@ class DeviceStateManager:
                 current_heating_cooling_state, target_heating_cooling_state,
                 heating_threshold_temperature, cooling_threshold_temperature,
                 temperature_display_units, battery_level, status_low_battery,
-                humidity, target_humidity, active_state, valve_position
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                humidity, target_humidity, active_state, valve_position,
+                window, window_lastupdate
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id, timestamp_bucket) DO UPDATE SET
                 current_temperature = COALESCE(excluded.current_temperature, current_temperature),
                 target_temperature = COALESCE(excluded.target_temperature, target_temperature),
@@ -410,6 +420,8 @@ class DeviceStateManager:
                 target_humidity = COALESCE(excluded.target_humidity, target_humidity),
                 active_state = COALESCE(excluded.active_state, active_state),
                 valve_position = COALESCE(excluded.valve_position, valve_position),
+                window = COALESCE(excluded.window, window), 
+                window_lastupdate = COALESCE(excluded.window_lastupdate, window_lastupdate),
                 updated_at = CURRENT_TIMESTAMP
         """, (
             device_id, bucket,
@@ -425,7 +437,9 @@ class DeviceStateManager:
             state.get('humidity'),
             state.get('target_humidity'),
             state.get('active_state'),
-            state.get('valve_position')
+            state.get('valve_position'),
+            state.get('window'),
+            state.get('window_lastupdate')
         ))
         conn.commit()
         conn.close()
@@ -446,6 +460,8 @@ class DeviceStateManager:
             'target_humidity': state.get('target_humidity'),
             'active_state': state.get('active_state'),
             'valve_position': state.get('valve_position'),
+            'window': state.get('window'),
+            'window_lastupdate': state.get('window_lastupdate'),
         }
 
         logger.debug(f"Saved device {device_id} state to history bucket {bucket}")
@@ -606,5 +622,52 @@ class DeviceStateManager:
         conn.close()
 
         return devices
+
+    def get_device_history_info(self, device_id: int, age: int) -> Dict[str, Any]:
+        """Get metadata about a device's history (earliest and latest timestamps)."""
         
-            
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute("""
+                SELECT current_temperature, window, window_lastupdate
+                  FROM device_state_history
+                 WHERE device_id = ?
+                   AND updated_at > datetime('now', ?)
+                 ORDER BY updated_at DESC
+                 """, (device_id, f"-{age} minutes"))
+        history = cursor.fetchall()
+        conn.close()
+
+        if history and len(history) > 0:
+            return {
+                'history_count': len(history),
+                'latest_entry': history[0],
+                'earliest_entry': history[-1],
+            }
+
+        return {
+            'history_count': 0,
+            'latest_entry': None,
+            'earliest_entry': None,
+        }
+    
+    def update_device_window_status(self, device_id: int, window_open: int):
+        """
+        Update the window open/closed status for a device.
+
+        Args:
+            device_id: The device ID to update.
+            window_open: 1 if window is open, 0 if closed, 2 if in rest.
+        """
+        if device_id not in self.current_state:
+            self.current_state[device_id] = {}
+
+        old_status = self.current_state[device_id].get('window')
+        self.current_state[device_id]['window'] = window_open
+        self.current_state[device_id]['window_lastupdate'] = time.time()
+
+        # Optionally, persist this change to history if status changed
+        if old_status != window_open:
+            self._save_to_history(device_id, time.time())
+            logger.info(f"Device {device_id} window status updated: {old_status} -> {window_open}")
+
+

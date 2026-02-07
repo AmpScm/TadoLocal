@@ -305,7 +305,12 @@
             font-size: 12px;
             margin-top: 5px;
         }
-
+        .window-open {
+            color: #ff5252;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+        
         .status-bar {
             background: white;
             border-radius: 8px;
@@ -956,6 +961,7 @@
                 const mode = state.mode || 0;
                 const curHeating = state.cur_heating || 0;
                 const batteryLow = state.battery_low;
+                const windowOpen = state.window_open || false;
                 
                 // Format temperature with one decimal, split for styling
                 let tempHtml = '--';
@@ -1027,6 +1033,7 @@
                             ${humidityHtml}
                             ${comfortHtml}
                             ${batteryLow ? '<div class="battery-low">⚠️ Low battery</div>' : ''}
+                            ${windowOpen ? '<div class="window-open">⚠️ WINDOW OPEN</div>' : ''}
                         </div>
                     </div>
                 `;
