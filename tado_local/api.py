@@ -28,6 +28,7 @@ from aiohomekit.controller.ip.pairing import IpPairing
 
 from .state import DeviceStateManager
 from .homekit_uuids import get_characteristic_name
+from .scheduler import SchedulerService
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -62,6 +63,9 @@ class TadoLocalAPI:
         self.subscribed_characteristics: List[tuple[int, int]] = []
         self.background_tasks: List[asyncio.Task] = []
         self.is_shutting_down = False
+        
+        # Scheduler service
+        self.scheduler_service: Optional[Any] = None
 
     async def initialize(self, pairing: IpPairing):
         """Initialize the API with a HomeKit pairing."""
@@ -69,6 +73,10 @@ class TadoLocalAPI:
         self.is_initializing = True  # Suppress change logging during init
         await self.refresh_accessories()
         await self.initialize_device_states()
+        
+        # Set all zones to Auto mode on startup
+        await self._set_all_zones_to_auto_mode()
+        
         self.is_initializing = False  # Re-enable change logging
         await self.setup_event_listeners()
         logger.info("Tado Local initialized successfully")
@@ -77,6 +85,10 @@ class TadoLocalAPI:
         """Clean up resources and unsubscribe from events."""
         logger.info("Starting cleanup...")
         self.is_shutting_down = True
+
+        # Stop scheduler service
+        if self.scheduler_service:
+            await self.scheduler_service.stop()
 
         # Cancel all background tasks
         if self.background_tasks:
@@ -266,6 +278,40 @@ class TadoLocalAPI:
 
         logger.info(f"Device state initialization complete - baseline established for {len(self.device_to_characteristics)} devices")
 
+    async def _set_all_zones_to_auto_mode(self):
+        """Set all zones to Auto mode (tracked_mode=3) on startup."""
+        if not self.pairing:
+            logger.warning("No pairing available, skipping Auto mode initialization")
+            return
+
+        zones_set = 0
+        for zone_id, zone_info in self.state_manager.zone_cache.items():
+            try:
+                # Set tracked_mode to 3 (Auto) in database and cache
+                self.state_manager.set_zone_tracked_mode(zone_id, 3)
+                zone_name = zone_info.get('name', f'Zone {zone_id}')
+                
+                # Set HomeKit target_heating_cooling_state to 1 (HEAT) for zone leader
+                # Auto mode shows as HEAT to HomeKit
+                leader_device_id = zone_info.get('leader_device_id')
+                if leader_device_id:
+                    try:
+                        await self.set_device_characteristics(
+                            leader_device_id,
+                            {'target_heating_cooling_state': 1}
+                        )
+                        zones_set += 1
+                        logger.info(f"Zone {zone_id} ({zone_name}): Set to Auto mode on startup")
+                    except Exception as e:
+                        logger.warning(f"Zone {zone_id} ({zone_name}): Failed to set HomeKit state to HEAT: {e}")
+                else:
+                    logger.debug(f"Zone {zone_id} ({zone_name}): No leader device, tracked_mode set to Auto")
+                    zones_set += 1
+            except Exception as e:
+                logger.error(f"Zone {zone_id}: Failed to set to Auto mode: {e}")
+
+        if zones_set > 0:
+            logger.info(f"Set {zones_set} zone(s) to Auto mode on startup")
 
     async def setup_event_listeners(self):
         """Setup unified change detection with events + polling comparison."""
@@ -455,6 +501,61 @@ class TadoLocalAPI:
                         )
                         if field_name:
                             logger.debug(f"Updated device {accessory['id']} {field_name}: {old_val} -> {new_val}")
+                            
+                            # Handle target_temperature changes - check if scheduled or manual
+                            if field_name == 'target_temperature' and is_zone_leader and device_id:
+                                zone_id = device_info.get('zone_id')
+                                if zone_id:
+                                    current_tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+                                    
+                                    # If in AUTO mode, check if the temperature matches scheduled temperature
+                                    if current_tracked_mode == 3:  # AUTO mode
+                                        # Check if this matches the latest scheduled temperature (within 0.1°C tolerance)
+                                        is_scheduled_match = False
+                                        
+                                        # First check if it was marked as scheduled change (quick path)
+                                        if self.state_manager.is_scheduled_change(zone_id, max_age_seconds=30.0):
+                                            is_scheduled_match = True
+                                            self.state_manager.clear_scheduled_change(zone_id)
+                                            logger.debug(f"Zone {zone_id} ({zone_name}): Temperature change was scheduled, keeping AUTO mode")
+                                        else:
+                                            # Check if the temperature matches the latest scheduled temperature
+                                            # (looks back through today and yesterday to find most recent schedule)
+                                            if hasattr(self, 'scheduler_service') and self.scheduler_service:
+                                                scheduled_temp = self.scheduler_service.get_latest_schedule_temperature(zone_id)
+                                                if scheduled_temp is not None:
+                                                    # Check if reported temperature matches latest scheduled (within 0.1°C tolerance)
+                                                    temp_diff = abs(float(value) - float(scheduled_temp))
+                                                    if temp_diff <= 0.1:
+                                                        is_scheduled_match = True
+                                                        logger.debug(f"Zone {zone_id} ({zone_name}): Temperature {value}°C matches latest scheduled {scheduled_temp}°C (diff: {temp_diff:.2f}°C), keeping AUTO mode")
+                                        
+                                        if not is_scheduled_match:
+                                            # Temperature doesn't match latest scheduled - this is a manual change
+                                            self.state_manager.set_zone_tracked_mode(zone_id, 1)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): Manual temperature change detected ({value}°C), switching from AUTO to HEAT mode")
+                            
+                            # Sync tracked_mode when TargetHeatingCoolingState changes externally
+                            if field_name == 'target_heating_cooling_state' and is_zone_leader and device_id:
+                                zone_id = device_info.get('zone_id')
+                                if zone_id:
+                                    current_tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+                                    new_hvac_state = int(value)  # value is 0 or 1 from HomeKit
+                                    
+                                    # If currently in Auto (3), only exit Auto mode if device reports OFF (0)
+                                    # If device reports HEAT (1), that's expected for Auto mode - don't exit Auto
+                                    if current_tracked_mode == 3:  # AUTO mode
+                                        if new_hvac_state == 0:  # Device reports OFF - user manually turned off
+                                            self.state_manager.set_zone_tracked_mode(zone_id, 0)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): Manual OFF detected, exiting AUTO mode (tracked_mode: 3 -> 0)")
+                                        # If new_hvac_state == 1, that's expected for Auto mode - device is just confirming our change
+                                        # Don't update tracked_mode, keep it at 3 (Auto)
+                                    else:
+                                        # Not in Auto mode - update tracked_mode to match external change
+                                        new_tracked_mode = new_hvac_state
+                                        if current_tracked_mode != new_tracked_mode:
+                                            self.state_manager.set_zone_tracked_mode(zone_id, new_tracked_mode)
+                                            logger.info(f"Zone {zone_id} ({zone_name}): tracked_mode updated from {current_tracked_mode} to {new_tracked_mode} (external change)")
 
             # Skip logging during initialization
             if not self.is_initializing:
@@ -535,7 +636,13 @@ class TadoLocalAPI:
         battery_state = device_info.get('battery_state')
         battery_low = battery_state is not None and battery_state != 'NORMAL'
 
-        return {
+        # Get tracked_mode from zone if device belongs to one
+        zone_id = device_info.get('zone_id')
+        tracked_mode = None
+        if zone_id:
+            tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+
+        result = {
             'cur_temp_c': cur_temp_c,
             'cur_temp_f': self._celsius_to_fahrenheit(cur_temp_c) if cur_temp_c is not None else None,
             'hum_perc': state.get('humidity'),
@@ -546,6 +653,12 @@ class TadoLocalAPI:
             'valve_position': state.get('valve_position'),
             'battery_low': battery_low,
         }
+        
+        # Add tracked_mode if device belongs to a zone
+        if tracked_mode is not None:
+            result['tracked_mode'] = tracked_mode
+            
+        return result
 
     async def broadcast_state_change(self, device_id: int, zone_name: str):
         """
@@ -587,6 +700,9 @@ class TadoLocalAPI:
                 if leader_device_id:
                     leader_state = self._build_device_state(leader_device_id)
 
+                    # Get tracked_mode for zone
+                    tracked_mode = self.state_manager.get_zone_tracked_mode(zone_id)
+
                     # Build zone state using zone logic
                     zone_state = {
                         'cur_temp_c': leader_state['cur_temp_c'],
@@ -595,6 +711,7 @@ class TadoLocalAPI:
                         'target_temp_c': leader_state['target_temp_c'],
                         'target_temp_f': leader_state['target_temp_f'],
                         'mode': 0,
+                        'tracked_mode': tracked_mode,
                         'cur_heating': 0
                     }
 

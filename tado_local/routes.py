@@ -25,7 +25,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, Request
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -440,11 +440,13 @@ def register_routes(app: FastAPI, get_tado_api):
         - Current temperature (°C and °F)
         - Current humidity (%)
         - Target temperature (°C and °F)
-        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState
+        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState from HomeKit
+        - Tracked mode (0=Off, 1=Heat, 3=Auto) - Internal tracked mode per zone
         - Currently heating (0=Off, 1=Heating, 2=Cooling) - CurrentHeatingCoolingState
 
         Note: Mode values depend on device capabilities. Heating-only devices typically
         support 0 (Off) and 1 (Heat). Devices with cooling may support additional values.
+        Tracked mode includes Auto (3) which is tracked internally but appears as Heat (1) to HomeKit.
 
         For individual device details, use /thermostats or /devices endpoints.
 
@@ -524,6 +526,9 @@ def register_routes(app: FastAPI, get_tado_api):
                 cur_temp_f = round(current_temp * 9/5 + 32, 1) if current_temp is not None else None
                 target_temp_f = round(target_temp * 9/5 + 32, 1) if target_temp is not None else None
 
+                # Get tracked_mode from zone cache
+                tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+
                 state_summary = {
                     'cur_temp_c': current_temp,
                     'cur_temp_f': cur_temp_f,
@@ -531,9 +536,12 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_c': target_temp,
                     'target_temp_f': target_temp_f,
                     'mode': mode,
+                    'tracked_mode': tracked_mode,
                     'cur_heating': cur_heating,
                 }
             else:
+                # Get tracked_mode even if zone_state is None
+                tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
                 state_summary = {
                     'cur_temp_c': None,
                     'cur_temp_f': None,
@@ -541,6 +549,7 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_c': None,
                     'target_temp_f': None,
                     'mode': 0,
+                    'tracked_mode': tracked_mode,
                     'cur_heating': 0,
                 }
 
@@ -591,11 +600,13 @@ def register_routes(app: FastAPI, get_tado_api):
         - Current temperature (°C and °F)
         - Current humidity (%)
         - Target temperature (°C and °F)
-        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState
+        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState from HomeKit
+        - Tracked mode (0=Off, 1=Heat, 3=Auto) - Internal tracked mode per zone
         - Currently heating (0=Off, 1=Heating, 2=Cooling) - CurrentHeatingCoolingState
 
         Note: Mode values depend on device capabilities. Heating-only devices typically
         support 0 (Off) and 1 (Heat). Devices with cooling may support additional values.
+        Tracked mode includes Auto (3) which is tracked internally but appears as Heat (1) to HomeKit.
 
         For individual device details, use /thermostats or /devices endpoints.
 
@@ -678,6 +689,9 @@ def register_routes(app: FastAPI, get_tado_api):
             cur_temp_f = round(current_temp * 9/5 + 32, 1) if current_temp is not None else None
             target_temp_f = round(target_temp * 9/5 + 32, 1) if target_temp is not None else None
 
+            # Get tracked_mode from zone cache
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+
             state_summary = {
                 'cur_temp_c': current_temp,
                 'cur_temp_f': cur_temp_f,
@@ -685,9 +699,12 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': target_temp,
                 'target_temp_f': target_temp_f,
                 'mode': mode,
+                'tracked_mode': tracked_mode,
                 'cur_heating': cur_heating,
             }
         else:
+            # Get tracked_mode even if zone_state is None
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
             state_summary = {
                 'cur_temp_c': None,
                 'cur_temp_f': None,
@@ -695,6 +712,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': None,
                 'target_temp_f': None,
                 'mode': 0,
+                'tracked_mode': tracked_mode,
                 'cur_heating': 0,
             }
 
@@ -751,10 +769,23 @@ def register_routes(app: FastAPI, get_tado_api):
         conn.commit()
         conn.close()
 
-        # Reload device cache to pick up zone info
+        # Reload zone cache to pick up new zone
+        tado_api.state_manager._load_zone_cache()
         tado_api.state_manager._load_device_cache()
 
-        return {'zone_id': zone_id, 'name': name}
+        # Return full zone object with tracked_mode
+        zone_info = tado_api.state_manager.zone_cache.get(zone_id)
+        if zone_info:
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            return {
+                'zone_id': zone_id,
+                'name': name,
+                'leader_device_id': leader_device_id,
+                'order_id': order_id,
+                'tracked_mode': tracked_mode
+            }
+        else:
+            return {'zone_id': zone_id, 'name': name}
 
     @app.put("/zones/{zone_id}", tags=["Zones"])
     async def update_zone(zone_id: int, name: Optional[str] = None, leader_device_id: Optional[int] = None, order_id: Optional[int] = None, api_key: Optional[str] = Depends(get_api_key)):
@@ -785,16 +816,31 @@ def register_routes(app: FastAPI, get_tado_api):
         conn.commit()
         conn.close()
 
-        # Reload device cache
+        # Reload zone and device cache
+        tado_api.state_manager._load_zone_cache()
         tado_api.state_manager._load_device_cache()
 
-        return {'zone_id': zone_id, 'updated': True}
+        # Return full zone object with tracked_mode
+        zone_info = tado_api.state_manager.zone_cache.get(zone_id)
+        if zone_info:
+            tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            return {
+                'zone_id': zone_id,
+                'name': zone_info.get('name'),
+                'leader_device_id': zone_info.get('leader_device_id'),
+                'order_id': zone_info.get('order_id'),
+                'tracked_mode': tracked_mode,
+                'updated': True
+            }
+        else:
+            return {'zone_id': zone_id, 'updated': True}
 
     @app.post("/zones/{zone_id}/set", tags=["Zones"])
     async def set_zone(
         zone_id: int,
         temperature: Optional[float] = None,
         heating_enabled: Optional[bool] = None,
+        mode: Optional[str] = None,
         no_implicit_mode: Optional[bool] = False,
         api_key: Optional[str] = Depends(get_api_key)
         ):
@@ -808,6 +854,7 @@ def register_routes(app: FastAPI, get_tado_api):
                         - 0 = disable heating (without changing target temp)
                         - >= 5 = set temperature and enable heating
             heating_enabled: Enable/disable heating mode (true/false)
+            mode: Set tracked mode - "off" (0), "heat" (1), or "auto" (3)
 
         Returns:
             Success status and applied values
@@ -825,9 +872,11 @@ def register_routes(app: FastAPI, get_tado_api):
             - This allows temporary on/off control without affecting your schedule
             - temperature=-1 is useful for automation: turn on without changing schedule
             - temperature=0 is useful for "away mode": turn off but remember setpoint
+            - mode="auto" sets tracked_mode=3 and HomeKit target_heating_cooling_state=1 (HEAT)
+            - mode="off" or "heat" sets tracked_mode and HomeKit state to match
         """
         # Log the incoming request
-        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled}")
+        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled} mode={mode}")
 
         tado_api = get_tado_api()
         if not tado_api:
@@ -867,6 +916,56 @@ def register_routes(app: FastAPI, get_tado_api):
             raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
 
         zone_name, leader_device_id, leader_serial = row
+
+        # Handle mode parameter
+        switching_to_auto = False
+        if mode is not None:
+            mode_lower = mode.lower()
+            if mode_lower == "auto":
+                # Set tracked_mode to 3 (Auto) and HomeKit to 1 (HEAT)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 3)
+                # Set heating_enabled to True when entering Auto mode (only if not explicitly set)
+                if heating_enabled is None:
+                    heating_enabled = True
+                switching_to_auto = True
+                logger.info(f"Zone {zone_id} ({zone_name}): Setting to Auto mode (tracked_mode=3)")
+                
+                # Ignore any temperature parameter when switching to AUTO
+                # Find the most recent scheduled temperature (may be from hours earlier or previous day)
+                if tado_api.scheduler_service:
+                    scheduled_temp = tado_api.scheduler_service.get_latest_schedule_temperature(zone_id)
+                    if scheduled_temp is not None:
+                        temperature = scheduled_temp
+                        logger.info(f"Zone {zone_id} ({zone_name}): Applied latest scheduled temperature {scheduled_temp}°C on switch to AUTO mode")
+                    else:
+                        # No scheduled temperature - ignore temperature parameter and don't change temperature
+                        temperature = None
+                        logger.info(f"Zone {zone_id} ({zone_name}): No scheduled temperature found, keeping current temperature")
+                else:
+                    # No scheduler service - ignore temperature parameter
+                    temperature = None
+                    logger.info(f"Zone {zone_id} ({zone_name}): Scheduler service not available, ignoring temperature parameter")
+            elif mode_lower == "off":
+                # Set tracked_mode to 0 (OFF) and HomeKit to 0 (OFF)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
+                if heating_enabled is None:
+                    heating_enabled = False
+            elif mode_lower == "heat":
+                # Set tracked_mode to 1 (HEAT) and HomeKit to 1 (HEAT)
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                if heating_enabled is None:
+                    heating_enabled = True
+            else:
+                raise HTTPException(status_code=400, detail="mode must be 'off', 'heat', or 'auto'")
+        
+        # If temperature is changed manually and zone is in AUTO mode, switch to HEAT
+        # But only if we're not currently switching to AUTO (which already handled temperature)
+        if temperature is not None and not switching_to_auto:
+            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            if current_tracked_mode == 3:  # AUTO mode
+                # Manual temperature change - switch to HEAT
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                logger.info(f"Zone {zone_id} ({zone_name}): Manual temperature change detected, switching from AUTO to HEAT mode")
 
         if not leader_device_id:
             # No explicit leader assigned - fall back to the first device in the zone
@@ -908,8 +1007,30 @@ def register_routes(app: FastAPI, get_tado_api):
                 char_updates['target_temperature'] = temperature
 
         if heating_enabled is not None:
-            # 0 = OFF, 1 = HEAT
-            char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
+            # heating_enabled directly controls HVAC mode
+            current_tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+            
+            if heating_enabled:
+                # Set HVAC to HEAT (1)
+                char_updates['target_heating_cooling_state'] = 1
+                # Only update tracked_mode if not in Auto mode (3)
+                # When mode=auto, tracked_mode should remain 3 (Auto)
+                if current_tracked_mode != 3:
+                    tado_api.state_manager.set_zone_tracked_mode(zone_id, 1)
+                    logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT and tracked_mode to 1")
+                else:
+                    logger.debug(f"Zone {zone_id}: heating_enabled=true - setting HVAC to HEAT, keeping tracked_mode at 3 (Auto)")
+            else:
+                # Set HVAC to OFF (0) and update tracked_mode to OFF (0)
+                # Even in Auto mode, turning off should exit Auto mode
+                char_updates['target_heating_cooling_state'] = 0
+                tado_api.state_manager.set_zone_tracked_mode(zone_id, 0)
+                logger.debug(f"Zone {zone_id}: heating_enabled=false - setting HVAC to OFF and tracked_mode to 0")
+        
+        # If switching to Auto mode, ensure HVAC is set to HEAT (even if heating_enabled wasn't processed)
+        if switching_to_auto and 'target_heating_cooling_state' not in char_updates:
+            char_updates['target_heating_cooling_state'] = 1
+            logger.debug(f"Zone {zone_id}: Auto mode - ensuring HVAC is set to HEAT (1)")
 
         if not char_updates:
             raise HTTPException(status_code=400, detail="No control parameters provided")
@@ -949,13 +1070,384 @@ def register_routes(app: FastAPI, get_tado_api):
                 'leader_serial': leader_serial,
                 'applied': {
                     'target_temperature': temperature,
-                    'heating_enabled': heating_enabled
+                    'heating_enabled': heating_enabled,
+                    'tracked_mode': tado_api.state_manager.get_zone_tracked_mode(zone_id)
                 }
             }
 
         except Exception as e:
             logger.error(f"Failed to control zone {zone_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set zone control: {str(e)}")
+
+    @app.get("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def get_zone_schedules(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get all schedules for a zone, grouped by type."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute("""
+            SELECT schedule_id, schedule_type, day_of_week, day_type, time, temperature, enabled, created_at, updated_at
+            FROM zone_schedules
+            WHERE zone_id = ?
+            ORDER BY schedule_type, day_of_week, day_type, time
+        """, (zone_id,))
+        
+        schedules = []
+        for row in cursor.fetchall():
+            schedules.append({
+                'schedule_id': row['schedule_id'],
+                'schedule_type': row['schedule_type'],
+                'day_of_week': row['day_of_week'],
+                'day_type': row['day_type'],
+                'time': row['time'],
+                'temperature': row['temperature'],
+                'enabled': bool(row['enabled']),
+                'created_at': row['created_at'],
+                'updated_at': row['updated_at']
+            })
+        
+        conn.close()
+        return {'zone_id': zone_id, 'schedules': schedules}
+
+    @app.get("/zones/{zone_id}/schedules/type", tags=["Schedules"])
+    async def get_zone_schedule_type(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get current schedule type for a zone (1, 2, or 3, or null if none)."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            SELECT DISTINCT schedule_type
+            FROM zone_schedules
+            WHERE zone_id = ?
+            LIMIT 1
+        """, (zone_id,))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        schedule_type = row[0] if row else None
+        return {'zone_id': zone_id, 'schedule_type': schedule_type}
+
+    @app.post("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def create_zone_schedule(
+        zone_id: int,
+        schedule_type: int,
+        time: str,
+        temperature: float,
+        day_of_week: Optional[int] = None,
+        day_type: Optional[str] = None,
+        enabled: bool = True,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Create a new schedule entry for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Validate schedule_type
+        if schedule_type not in (1, 2, 3):
+            raise HTTPException(status_code=400, detail="schedule_type must be 1 (day_of_week), 2 (weekday_weekend), or 3 (all_day)")
+        
+        # Validate time format (HH:MM with 5-minute intervals)
+        import re
+        if not re.match(r'^([0-1][0-9]|2[0-3]):([0-5][05])$', time):
+            raise HTTPException(status_code=400, detail="time must be in HH:MM format with minutes in 5-minute intervals (00, 05, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)")
+        
+        # Validate schedule_type-specific fields
+        if schedule_type == 1:  # day_of_week
+            if day_of_week is None or day_of_week < 0 or day_of_week > 6:
+                raise HTTPException(status_code=400, detail="day_of_week must be 0-6 for schedule_type 1")
+            if day_type is not None:
+                raise HTTPException(status_code=400, detail="day_type must be NULL for schedule_type 1")
+        elif schedule_type == 2:  # weekday_weekend
+            if day_type not in ('weekday', 'weekend'):
+                raise HTTPException(status_code=400, detail="day_type must be 'weekday' or 'weekend' for schedule_type 2")
+            if day_of_week is not None:
+                raise HTTPException(status_code=400, detail="day_of_week must be NULL for schedule_type 2")
+        elif schedule_type == 3:  # all_day
+            if day_of_week is not None or day_type is not None:
+                raise HTTPException(status_code=400, detail="day_of_week and day_type must be NULL for schedule_type 3")
+        
+        # Check if zone has existing schedules of different type
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            SELECT DISTINCT schedule_type
+            FROM zone_schedules
+            WHERE zone_id = ? AND schedule_type != ?
+        """, (zone_id, schedule_type))
+        
+        existing_type = cursor.fetchone()
+        if existing_type:
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail=f"Zone already has schedules of type {existing_type[0]}. Clear existing schedules before creating schedules of type {schedule_type}."
+            )
+        
+        # Insert schedule
+        try:
+            cursor = conn.execute("""
+                INSERT INTO zone_schedules (zone_id, schedule_type, day_of_week, day_type, time, temperature, enabled)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (zone_id, schedule_type, day_of_week, day_type, time, temperature, 1 if enabled else 0))
+            schedule_id = cursor.lastrowid
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            conn.close()
+            raise HTTPException(status_code=400, detail=f"Schedule already exists: {str(e)}")
+        
+        conn.close()
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.put("/zones/{zone_id}/schedules/{schedule_id}", tags=["Schedules"])
+    async def update_zone_schedule(
+        zone_id: int,
+        schedule_id: int,
+        request: Request,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Update a schedule entry."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Parse JSON body
+        try:
+            body = await request.json()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid JSON body: {str(e)}")
+        
+        # Extract fields from JSON body
+        time = body.get('time')
+        temperature = body.get('temperature')
+        enabled = body.get('enabled')
+        
+        # Validate and normalize inputs
+        # Handle empty strings as None
+        if time is not None and time == "":
+            time = None
+        if temperature is not None and temperature == "":
+            temperature = None
+        
+        # Validate time format if provided
+        if time is not None:
+            import re
+            if not isinstance(time, str) or not re.match(r'^([0-1][0-9]|2[0-3]):([0-5][05])$', time):
+                raise HTTPException(status_code=400, detail="time must be in HH:MM format with minutes in 5-minute intervals")
+        
+        # Validate temperature if provided
+        if temperature is not None:
+            try:
+                temperature = float(temperature)
+                if temperature < 5.0 or temperature > 30.0:
+                    raise HTTPException(status_code=400, detail="temperature must be between 5 and 30°C")
+            except (ValueError, TypeError):
+                raise HTTPException(status_code=400, detail="temperature must be a valid number")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        
+        # Check if schedule exists and belongs to zone
+        cursor = conn.execute("""
+            SELECT schedule_id FROM zone_schedules
+            WHERE schedule_id = ? AND zone_id = ?
+        """, (schedule_id, zone_id))
+        
+        if not cursor.fetchone():
+            conn.close()
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        
+        # Build update query
+        updates = []
+        params = []
+        
+        if time is not None:
+            updates.append("time = ?")
+            params.append(time)
+        if temperature is not None:
+            updates.append("temperature = ?")
+            params.append(temperature)
+        if enabled is not None:
+            updates.append("enabled = ?")
+            params.append(1 if enabled else 0)
+        
+        if not updates:
+            conn.close()
+            raise HTTPException(status_code=400, detail="No fields to update. Please provide at least one of: time, temperature, or enabled")
+        
+        updates.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([schedule_id, zone_id])
+        
+        conn.execute(f"""
+            UPDATE zone_schedules
+            SET {', '.join(updates)}
+            WHERE schedule_id = ? AND zone_id = ?
+        """, params)
+        conn.commit()
+        conn.close()
+        
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.delete("/zones/{zone_id}/schedules/{schedule_id}", tags=["Schedules"])
+    async def delete_zone_schedule(
+        zone_id: int,
+        schedule_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Delete a schedule entry."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            DELETE FROM zone_schedules
+            WHERE schedule_id = ? AND zone_id = ?
+        """, (schedule_id, zone_id))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        if deleted == 0:
+            raise HTTPException(status_code=404, detail="Schedule not found")
+        
+        return {'schedule_id': schedule_id, 'zone_id': zone_id, 'success': True}
+
+    @app.delete("/zones/{zone_id}/schedules", tags=["Schedules"])
+    async def clear_zone_schedules(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Clear all schedules for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute("""
+            DELETE FROM zone_schedules
+            WHERE zone_id = ?
+        """, (zone_id,))
+        
+        deleted = cursor.rowcount
+        conn.commit()
+        conn.close()
+        
+        return {'zone_id': zone_id, 'deleted_count': deleted, 'success': True}
+
+    @app.get("/zones/{zone_id}/schedules/current", tags=["Schedules"])
+    async def get_current_schedule_temperature(
+        zone_id: int,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Get current scheduled temperature for a zone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        if not tado_api.scheduler_service:
+            raise HTTPException(status_code=503, detail="Scheduler service not available")
+        
+        temperature = tado_api.scheduler_service.get_current_schedule_temperature(zone_id)
+        return {'zone_id': zone_id, 'temperature': temperature}
+
+    @app.get("/config/timezone", tags=["Configuration"])
+    async def get_timezone(api_key: Optional[str] = Depends(get_api_key)):
+        """Get configured timezone."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        from .scheduler import get_timezone
+        timezone = get_timezone(tado_api.state_manager.db_path)
+        return {'timezone': timezone}
+
+    @app.put("/config/timezone", tags=["Configuration"])
+    async def set_timezone(
+        timezone: str,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Set timezone (e.g., 'Europe/Amsterdam')."""
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+        
+        # Validate timezone
+        try:
+            # Import ZoneInfo (try standard library first, then backport)
+            ZoneInfoNotFoundError = None
+            try:
+                from zoneinfo import ZoneInfo
+                # Try to import the exception class
+                try:
+                    from zoneinfo._zoneinfo import ZoneInfoNotFoundError
+                except (ImportError, AttributeError):
+                    try:
+                        from zoneinfo import ZoneInfoNotFoundError
+                    except ImportError:
+                        pass  # Will catch KeyError instead
+            except ImportError:
+                from backports.zoneinfo import ZoneInfo
+                try:
+                    from backports.zoneinfo.exceptions import ZoneInfoNotFoundError
+                except ImportError:
+                    pass  # backports.zoneinfo raises KeyError when timezone not found
+            
+            # Validate the timezone
+            try:
+                ZoneInfo(timezone)
+            except Exception as e:
+                # Check if this is a "timezone not found" error
+                error_msg = str(e)
+                is_timezone_not_found = (
+                    "No time zone found" in error_msg or
+                    "timezone" in error_msg.lower() and "not found" in error_msg.lower() or
+                    isinstance(e, KeyError) or
+                    (ZoneInfoNotFoundError and isinstance(e, ZoneInfoNotFoundError))
+                )
+                
+                if is_timezone_not_found:
+                    raise HTTPException(
+                        status_code=400, 
+                        detail=f"Timezone '{timezone}' not found. This may be due to missing timezone data. "
+                               f"On Linux systems, install the system 'tzdata' package (e.g., 'apt-get install tzdata' "
+                               f"or 'yum install tzdata'). If using backports.zoneinfo, you may also need to "
+                               f"install the Python 'tzdata' package: 'pip install tzdata'. "
+                               f"Original error: {error_msg}"
+                    )
+                else:
+                    # Some other error during validation
+                    raise HTTPException(status_code=400, detail=f"Invalid timezone '{timezone}': {error_msg}")
+        except HTTPException:
+            raise
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Error validating timezone '{timezone}': {str(e)}")
+        
+        # Store in database
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        conn.execute("""
+            INSERT OR REPLACE INTO app_config (config_key, config_value, updated_at)
+            VALUES ('timezone', ?, CURRENT_TIMESTAMP)
+        """, (timezone,))
+        conn.commit()
+        conn.close()
+        
+        # Clear timezone cache in scheduler service
+        if tado_api.scheduler_service:
+            tado_api.scheduler_service._timezone_cache = None
+        
+        return {'timezone': timezone, 'success': True}
 
     @app.get("/devices", tags=["Devices"])
     async def get_devices(api_key: Optional[str] = Depends(get_api_key)):
@@ -1513,12 +2005,16 @@ def register_routes(app: FastAPI, get_tado_api):
                                                 break
 
                                     if zone_state:
+                                        # Get tracked_mode for zone
+                                        tracked_mode = tado_api.state_manager.get_zone_tracked_mode(zone_id)
+                                        
                                         # Build simplified state for SSE
                                         state = {
                                             'cur_temp_c': zone_state.get('current_temperature'),
                                             'hum_perc': zone_state.get('humidity'),
                                             'target_temp_c': zone_state.get('target_temperature'),
                                             'mode': zone_state.get('target_heating_cooling_state', 0),
+                                            'tracked_mode': tracked_mode,
                                             'cur_heating': zone_state.get('current_heating_cooling_state', 0),
                                             'battery_low': zone_state.get('battery_low', False)
                                         }

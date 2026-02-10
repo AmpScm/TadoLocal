@@ -69,6 +69,9 @@ class DeviceStateManager:
         self.optimistic_state: Dict[int, Dict[str, Any]] = {}  # device_id -> predicted state changes
         self.optimistic_timestamps: Dict[int, float] = {}  # device_id -> timestamp when prediction was made
         self.optimistic_timeout = 10.0  # Revert predictions after 10 seconds if no real update
+        
+        # Scheduled change tracking (to distinguish scheduled changes from user changes)
+        self._scheduled_changes: Dict[int, float] = {}  # zone_id -> timestamp of last scheduled change
 
         # Ensure DB schema and migrations are applied before using DB. All
         # schema updates are centralized in `tado_local.database.ensure_schema_and_migrate`.
@@ -118,13 +121,13 @@ class DeviceStateManager:
             SELECT z.zone_id, z.name, z.leader_device_id, z.order_id,
                    d.serial_number as leader_serial, d.device_type as leader_type,
                    z.tado_zone_id, 
-                   d.is_circuit_driver, z.uuid
+                   d.is_circuit_driver, z.uuid, z.tracked_mode
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
-        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val in cursor.fetchall():
+        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val, tracked_mode in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
@@ -134,7 +137,8 @@ class DeviceStateManager:
                 'leader_serial': leader_serial,
                 'leader_type': leader_type,
                 'is_circuit_driver': bool(is_circuit_driver),
-                'uuid': uuid_val
+                'uuid': uuid_val,
+                'tracked_mode': tracked_mode if tracked_mode is not None else 1  # Default to 1 (HEAT) if NULL
             }
 
         conn.close()
@@ -197,6 +201,38 @@ class DeviceStateManager:
     def get_device_id_by_aid(self, aid: int) -> Optional[int]:
         """Get device_id from HomeKit accessory ID (aid)."""
         return self.aid_to_device_id.get(aid)
+
+    def get_zone_tracked_mode(self, zone_id: int) -> int:
+        """Get tracked_mode for a zone (0=OFF, 1=HEAT, 3=Auto).
+        
+        Returns the tracked_mode from cache, or 1 (HEAT) as default if zone not found.
+        """
+        zone_info = self.zone_cache.get(zone_id)
+        if zone_info:
+            return zone_info.get('tracked_mode', 1)
+        # Fallback: query database if not in cache
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute("SELECT tracked_mode FROM zones WHERE zone_id = ?", (zone_id,))
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] is not None else 1
+
+    def set_zone_tracked_mode(self, zone_id: int, mode: int) -> None:
+        """Set tracked_mode for a zone (0=OFF, 1=HEAT, 3=Auto).
+        
+        Updates both database and cache.
+        """
+        if mode not in (0, 1, 3):
+            raise ValueError(f"Invalid tracked_mode: {mode}. Must be 0 (OFF), 1 (HEAT), or 3 (Auto)")
+        
+        conn = sqlite3.connect(self.db_path)
+        conn.execute("UPDATE zones SET tracked_mode = ? WHERE zone_id = ?", (mode, zone_id))
+        conn.commit()
+        conn.close()
+        
+        # Update cache
+        if zone_id in self.zone_cache:
+            self.zone_cache[zone_id]['tracked_mode'] = mode
 
     def get_or_create_device(self, serial_number: str, aid: int, accessory_data: dict) -> int:
         """Get or create device ID for a serial number, updating aid if needed."""
@@ -576,6 +612,48 @@ class DeviceStateManager:
                 logger.debug(f"Applied optimistic state to device {device_id} (age: {age:.1f}s)")
         
         return state
+
+    def mark_scheduled_change(self, zone_id: int) -> None:
+        """Mark that a temperature change was scheduled for a zone.
+        
+        Args:
+            zone_id: Zone ID that had a scheduled change
+        """
+        self._scheduled_changes[zone_id] = time.time()
+        logger.debug(f"Marked scheduled change for zone {zone_id}")
+
+    def is_scheduled_change(self, zone_id: int, max_age_seconds: float = 10.0) -> bool:
+        """Check if a recent change was scheduled.
+        
+        Args:
+            zone_id: Zone ID to check
+            max_age_seconds: Maximum age in seconds for a scheduled change to be considered valid
+        
+        Returns:
+            True if a scheduled change was recorded within max_age_seconds, False otherwise
+        """
+        if zone_id not in self._scheduled_changes:
+            return False
+        
+        change_time = self._scheduled_changes[zone_id]
+        age = time.time() - change_time
+        
+        if age > max_age_seconds:
+            # Scheduled change is too old, clear it
+            del self._scheduled_changes[zone_id]
+            return False
+        
+        return True
+
+    def clear_scheduled_change(self, zone_id: int) -> None:
+        """Clear the scheduled change flag for a zone.
+        
+        Args:
+            zone_id: Zone ID to clear
+        """
+        if zone_id in self._scheduled_changes:
+            del self._scheduled_changes[zone_id]
+            logger.debug(f"Cleared scheduled change flag for zone {zone_id}")
 
     def get_all_devices(self) -> List[Dict]:
         """Get all registered devices with full details including zone information."""
