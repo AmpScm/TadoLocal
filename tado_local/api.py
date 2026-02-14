@@ -381,7 +381,7 @@ class TadoLocalAPI:
         """Helper to find IID from characteristic type in an accessory."""
         char_key = (aid, char_name)
         return self.characteristic_iid_map.get(char_key)
-    
+
     async def handle_change(self, aid, iid, update_data, source="UNKNOWN"):
         """Unified handler for all characteristic changes (events AND polling)."""
         try:

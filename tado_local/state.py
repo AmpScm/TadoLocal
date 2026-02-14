@@ -64,7 +64,7 @@ class DeviceStateManager:
         self.current_state: Dict[int, Dict[str, Any]] = {}  # device_id -> current state
         self.last_saved_bucket: Dict[int, str] = {}  # device_id -> last saved bucket
         self.bucket_state_snapshot: Dict[int, Dict[str, Any]] = {}  # device_id -> state when bucket was saved
-        
+
         # Optimistic update tracking (for UI responsiveness)
         self.optimistic_state: Dict[int, Dict[str, Any]] = {}  # device_id -> predicted state changes
         self.optimistic_timestamps: Dict[int, float] = {}  # device_id -> timestamp when prediction was made
@@ -530,10 +530,10 @@ class DeviceStateManager:
     def set_optimistic_state(self, device_id: int, state_changes: Dict[str, Any]):
         """
         Set optimistic state prediction for a device.
-        
+
         This allows immediate UI feedback before HomeKit confirms the change.
         Predictions automatically expire after self.optimistic_timeout seconds.
-        
+
         Args:
             device_id: Device to update
             state_changes: Dict of state keys to predicted values
@@ -549,16 +549,16 @@ class DeviceStateManager:
             # This would indicate the device rejected or modified our change
             predicted = self.optimistic_state[device_id]
             actual = self.current_state.get(device_id, {})
-            
+
             mismatches = []
             for key, predicted_value in predicted.items():
                 actual_value = actual.get(key)
                 if actual_value is not None and actual_value != predicted_value:
                     mismatches.append(f"{key}: predicted={predicted_value}, actual={actual_value}")
-            
+
             if mismatches:
                 logger.info(f"Device {device_id}: Optimistic state was overridden by device - {', '.join(mismatches)}")
-            
+
             del self.optimistic_state[device_id]
             del self.optimistic_timestamps[device_id]
             logger.debug(f"Cleared optimistic state for device {device_id}")
@@ -566,21 +566,21 @@ class DeviceStateManager:
     def get_state_with_optimistic(self, device_id: int) -> Dict:
         """
         Get device state with optimistic predictions overlaid.
-        
+
         If optimistic predictions exist and haven't expired, they override
         the real state values. Expired predictions are automatically cleared.
-        
+
         Returns:
             Dict with current state + active optimistic overrides
         """
         # Start with real state
         state = self.current_state.get(device_id, {}).copy()
-        
+
         # Check for optimistic overrides
         if device_id in self.optimistic_state:
             prediction_time = self.optimistic_timestamps[device_id]
             age = time.time() - prediction_time
-            
+
             if age > self.optimistic_timeout:
                 # Prediction expired - clear it
                 logger.debug(f"Optimistic state for device {device_id} expired after {age:.1f}s")
@@ -590,27 +590,27 @@ class DeviceStateManager:
                 optimistic = self.optimistic_state[device_id]
                 state.update(optimistic)
                 logger.debug(f"Applied optimistic state to device {device_id} (age: {age:.1f}s)")
-        
+
         return state
 
     def get_all_devices(self) -> List[Dict]:
         """Get all registered devices with full details including zone information."""
         conn = sqlite3.connect(self.db_path)
-        
+
         cursor = conn.execute("""
             SELECT d.device_id, d.serial_number, d.aid, d.device_type, d.name, 
                     d.model, d.manufacturer, d.firmware_version, d.zone_id, 
                     z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, 
-                    d.first_seen, d.last_seen 
+                    d.battery_state, d.first_seen, d.last_seen 
             FROM devices d
             LEFT JOIN zones z ON d.zone_id = z.zone_id
             ORDER BY device_id
         """)
-        
+
         # Extract column names from cursor metadata
         column_names = [desc[0] for desc in cursor.description]
 
-        # Convert each row to a dictionary with column names as keys 
+        # Convert each row to a dictionary with column names as keys
         # (convert 'is_zone_leader' and 'is_circuit_driver' to  bool type)
         devices = []
         for row in cursor.fetchall():

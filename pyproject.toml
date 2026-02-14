@@ -28,6 +28,9 @@ dependencies = [
   "dbus-next>=0.2.3",
 ]
 
+[project.scripts]
+tado-local = "tado_local.__main__:main"
+
 [project.urls]
 Homepage = "https://github.com/AmpScm/tado-local"
 Repository = "https://github.com/AmpScm/tado-local.git"

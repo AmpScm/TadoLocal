@@ -24,7 +24,7 @@ def _pack_ipv4(addr: str):
         return None
 
 
-def _get_primary_ipv4():
+def get_primary_ipv4():
     """Return a best-effort primary IPv4 address for this host as a string, or None.
 
     We use a UDP socket connect trick which doesn't send packets but reveals the
@@ -71,8 +71,10 @@ async def register_service_async(name: str = 'tado-local', port: int = 4407, pro
     # Determine address bytes to advertise. If the caller provided an
     # explicit advertise_addr use that; otherwise pick a sensible local IPv4.
     addresses = None
+    ip4 = None
     try:
-        addr_to_use = advertise_addr or _get_primary_ipv4()
+        addr_to_use = advertise_addr or get_primary_ipv4()
+        ip4 = addr_to_use
         if addr_to_use:
             packed = _pack_ipv4(addr_to_use)
             if packed:
@@ -123,10 +125,10 @@ async def register_service_async(name: str = 'tado-local', port: int = 4407, pro
             "AsyncZeroconf registered service %s (published as: %s) on port %s (addresses=%s srv=%s props=%s)",
             name, actual_name or name, port, addr_str, srv_target, decoded_props,
         )
-        return True, 'zeroconf_async', None
+        return True, 'zeroconf_async', None, ip4
     except Exception as e:
         logger.exception("AsyncZeroconf registration failed for %s", name)
-        return False, None, str(e)
+        return False, None, str(e), "0.0.0.0"
 
 
 async def unregister_service_async():

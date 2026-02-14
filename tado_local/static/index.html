@@ -5,6 +5,146 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Tado Local</title>
     <style>
+        /* Light theme (default) */
+        :root {
+            --bg-primary: #f5f5f5;
+            --bg-card: white;
+            --bg-modal: white;
+            --bg-disabled: #e0e0e0;
+            --bg-error: #ffebee;
+            --bg-success: #e8f5e9;
+            --bg-accent-subtle: #fff3e0;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-muted: #999;
+            --text-on-accent: white;
+            --text-error: #c62828;
+            --text-success: #388e3c;
+            --accent: #ff7b2e;
+            --accent-hover: #ff6b1e;
+            --accent-pending: #ff9642;
+            --border-color: #ddd;
+            --border-light: #e0e0e0;
+            --card-off-bg: #e0e0e0;
+            --card-off-text: #666;
+            --card-cold-start: #4caf50;
+            --card-cold-end: #45a049;
+            --card-medium-start: #ffab5e;
+            --card-medium-end: #ff9642;
+            --card-hot-start: #f44336;
+            --card-hot-end: #e53935;
+            --btn-secondary-bg: #e0e0e0;
+            --btn-secondary-bg-hover: #d0d0d0;
+            --btn-secondary-text: #666;
+            --cloud-connected: #4caf50;
+            --cloud-disabled: #999;
+            --battery-low: #ff5252;
+            --modal-overlay: rgba(0,0,0,0.5);
+            --chart-temp: #2196F3;
+            --chart-temp-bg: rgba(33, 150, 243, 0.1);
+            --chart-target: #FF7B2E;
+            --chart-target-bg: rgba(255, 123, 46, 0.1);
+            --chart-humidity: #4CAF50;
+            --chart-humidity-bg: rgba(76, 175, 80, 0.1);
+            --chart-heating-bg: rgba(255, 87, 34, 0.15);
+            --chart-grid: rgba(0, 0, 0, 0.1);
+            --chart-text: #666;
+        }
+
+        /* Dark theme */
+        [data-theme="dark"] {
+            --bg-primary: #1a1a1a;
+            --bg-card: #2a2a2a;
+            --bg-modal: #333;
+            --bg-disabled: #3a3a3a;
+            --bg-error: #3c1515;
+            --bg-success: #152e15;
+            --bg-accent-subtle: #3a2a1a;
+            --text-primary: #e0e0e0;
+            --text-secondary: #aaa;
+            --text-muted: #888;
+            --text-on-accent: white;
+            --text-error: #ef9a9a;
+            --text-success: #81c784;
+            --accent: #ff7b2e;
+            --accent-hover: #ff9642;
+            --accent-pending: #ff9642;
+            --border-color: #444;
+            --border-light: #444;
+            --card-off-bg: #3a3a3a;
+            --card-off-text: #999;
+            --card-cold-start: #388e3c;
+            --card-cold-end: #2e7d32;
+            --card-medium-start: #e69540;
+            --card-medium-end: #cc7a2a;
+            --card-hot-start: #d32f2f;
+            --card-hot-end: #c62828;
+            --btn-secondary-bg: #444;
+            --btn-secondary-bg-hover: #555;
+            --btn-secondary-text: #ccc;
+            --cloud-connected: #66bb6a;
+            --cloud-disabled: #888;
+            --battery-low: #ff5252;
+            --modal-overlay: rgba(0,0,0,0.7);
+            --chart-temp: #64b5f6;
+            --chart-temp-bg: rgba(100, 181, 246, 0.15);
+            --chart-target: #ffab5e;
+            --chart-target-bg: rgba(255, 171, 94, 0.15);
+            --chart-humidity: #66bb6a;
+            --chart-humidity-bg: rgba(102, 187, 106, 0.15);
+            --chart-heating-bg: rgba(255, 87, 34, 0.2);
+            --chart-grid: rgba(255, 255, 255, 0.1);
+            --chart-text: #aaa;
+        }
+
+        /* Auto-detect OS preference when no explicit theme is set */
+        @media (prefers-color-scheme: dark) {
+            :root:not([data-theme]) {
+                --bg-primary: #1a1a1a;
+                --bg-card: #2a2a2a;
+                --bg-modal: #333;
+                --bg-disabled: #3a3a3a;
+                --bg-error: #3c1515;
+                --bg-success: #152e15;
+                --bg-accent-subtle: #3a2a1a;
+                --text-primary: #e0e0e0;
+                --text-secondary: #aaa;
+                --text-muted: #888;
+                --text-on-accent: white;
+                --text-error: #ef9a9a;
+                --text-success: #81c784;
+                --accent: #ff7b2e;
+                --accent-hover: #ff9642;
+                --accent-pending: #ff9642;
+                --border-color: #444;
+                --border-light: #444;
+                --card-off-bg: #3a3a3a;
+                --card-off-text: #999;
+                --card-cold-start: #388e3c;
+                --card-cold-end: #2e7d32;
+                --card-medium-start: #e69540;
+                --card-medium-end: #cc7a2a;
+                --card-hot-start: #d32f2f;
+                --card-hot-end: #c62828;
+                --btn-secondary-bg: #444;
+                --btn-secondary-bg-hover: #555;
+                --btn-secondary-text: #ccc;
+                --cloud-connected: #66bb6a;
+                --cloud-disabled: #888;
+                --battery-low: #ff5252;
+                --modal-overlay: rgba(0,0,0,0.7);
+                --chart-temp: #64b5f6;
+                --chart-temp-bg: rgba(100, 181, 246, 0.15);
+                --chart-target: #ffab5e;
+                --chart-target-bg: rgba(255, 171, 94, 0.15);
+                --chart-humidity: #66bb6a;
+                --chart-humidity-bg: rgba(102, 187, 106, 0.15);
+                --chart-heating-bg: rgba(255, 87, 34, 0.2);
+                --chart-grid: rgba(255, 255, 255, 0.1);
+                --chart-text: #aaa;
+            }
+        }
+
         * {
             margin: 0;
             padding: 0;
@@ -13,7 +153,8 @@
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
-            background: #f5f5f5;
+            background: var(--bg-primary);
+            color: var(--text-primary);
             padding: 20px;
         }
 
@@ -22,10 +163,31 @@
             margin: 0 auto;
         }
 
-        h1 {
-            color: #333;
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 30px;
+        }
+
+        h1 {
+            color: var(--text-primary);
             font-weight: 400;
+        }
+
+        .theme-toggle {
+            background: none;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 10px;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 1;
+            transition: border-color 0.2s;
+        }
+
+        .theme-toggle:hover {
+            border-color: var(--accent);
         }
 
         .zones-grid {
@@ -36,7 +198,7 @@
         }
 
         .zone-card {
-            background: white;
+            background: var(--bg-card);
             border-radius: 12px;
             padding: 20px;
             cursor: pointer;
@@ -54,23 +216,23 @@
         }
 
         .zone-card.heating-cold {
-            background: linear-gradient(135deg, #4caf50 0%, #45a049 100%);
-            color: white;
+            background: linear-gradient(135deg, var(--card-cold-start) 0%, var(--card-cold-end) 100%);
+            color: var(--text-on-accent);
         }
 
         .zone-card.heating-medium {
-            background: linear-gradient(135deg, #ffab5e 0%, #ff9642 100%);
-            color: white;
+            background: linear-gradient(135deg, var(--card-medium-start) 0%, var(--card-medium-end) 100%);
+            color: var(--text-on-accent);
         }
 
         .zone-card.heating-hot {
-            background: linear-gradient(135deg, #f44336 0%, #e53935 100%);
-            color: white;
+            background: linear-gradient(135deg, var(--card-hot-start) 0%, var(--card-hot-end) 100%);
+            color: var(--text-on-accent);
         }
 
         .zone-card.off {
-            background: #e0e0e0;
-            color: #666;
+            background: var(--card-off-bg);
+            color: var(--card-off-text);
         }
 
         .zone-temp {
@@ -120,7 +282,7 @@
         }
 
         .zone-status::before {
-            content: '▼';
+            content: '\25BC';
             font-size: 10px;
         }
 
@@ -145,7 +307,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: rgba(0,0,0,0.5);
+            background: var(--modal-overlay);
             z-index: 1000;
             align-items: center;
             justify-content: center;
@@ -156,13 +318,14 @@
         }
 
         .modal-content {
-            background: white;
+            background: var(--bg-modal);
             border-radius: 12px;
             padding: 30px;
             max-width: 400px;
             width: 90%;
             max-height: 90vh;
             overflow-y: auto;
+            color: var(--text-primary);
         }
 
         .modal-header {
@@ -178,7 +341,7 @@
         .modal-temp {
             font-size: 48px;
             font-weight: 300;
-            color: #ff7b2e;
+            color: var(--accent);
         }
 
         .control-group {
@@ -188,7 +351,7 @@
         .control-label {
             font-size: 14px;
             font-weight: 500;
-            color: #666;
+            color: var(--text-secondary);
             margin-bottom: 10px;
             display: block;
         }
@@ -205,17 +368,17 @@
             width: 50px;
             height: 50px;
             border-radius: 50%;
-            border: 2px solid #ff7b2e;
-            background: white;
-            color: #ff7b2e;
+            border: 2px solid var(--accent);
+            background: var(--bg-modal);
+            color: var(--accent);
             font-size: 24px;
             cursor: pointer;
             transition: all 0.2s;
         }
 
         .temp-button:hover {
-            background: #ff7b2e;
-            color: white;
+            background: var(--accent);
+            color: var(--text-on-accent);
         }
 
         .temp-display {
@@ -233,22 +396,23 @@
 
         .mode-button {
             padding: 15px;
-            border: 2px solid #ddd;
+            border: 2px solid var(--border-color);
             border-radius: 8px;
-            background: white;
+            background: var(--bg-modal);
+            color: var(--text-primary);
             cursor: pointer;
             font-size: 14px;
             transition: all 0.2s;
         }
 
         .mode-button:hover {
-            border-color: #ff7b2e;
+            border-color: var(--accent);
         }
 
         .mode-button.active {
-            border-color: #ff7b2e;
-            background: #fff3e0;
-            color: #ff7b2e;
+            border-color: var(--accent);
+            background: var(--bg-accent-subtle);
+            color: var(--accent);
             font-weight: 500;
         }
 
@@ -269,39 +433,44 @@
         }
 
         .btn-primary {
-            background: #ff7b2e;
-            color: white;
+            background: var(--accent);
+            color: var(--text-on-accent);
         }
 
         .btn-primary:hover {
-            background: #ff6b1e;
+            background: var(--accent-hover);
         }
 
         .btn-secondary {
-            background: #e0e0e0;
-            color: #666;
+            background: var(--btn-secondary-bg);
+            color: var(--btn-secondary-text);
         }
 
         .btn-secondary:hover {
-            background: #d0d0d0;
+            background: var(--btn-secondary-bg-hover);
         }
 
         .loading {
             text-align: center;
             padding: 40px;
-            color: #999;
+            color: var(--text-muted);
         }
 
         .error {
-            background: #ffebee;
-            color: #c62828;
+            background: var(--bg-error);
+            color: var(--text-error);
             padding: 15px;
             border-radius: 8px;
             margin-bottom: 20px;
         }
 
+        .error.success {
+            background: var(--bg-success);
+            color: var(--text-success);
+        }
+
         .battery-low {
-            color: #ff5252;
+            color: var(--battery-low);
             font-size: 12px;
             margin-top: 5px;
         }
@@ -312,7 +481,7 @@
         }
         
         .status-bar {
-            background: white;
+            background: var(--bg-card);
             border-radius: 8px;
             padding: 15px;
             margin-bottom: 20px;
@@ -323,32 +492,36 @@
 
         .status-item {
             font-size: 14px;
-            color: #666;
+            color: var(--text-secondary);
         }
 
         .status-value {
             font-weight: 500;
-            color: #333;
+            color: var(--text-primary);
         }
+
+        .cloud-connected { color: var(--cloud-connected); }
+        .cloud-pending { color: var(--accent-pending); }
+        .cloud-disabled { color: var(--cloud-disabled); }
 
         .footer {
             text-align: center;
             padding: 30px 20px;
             margin-top: 40px;
-            border-top: 1px solid #e0e0e0;
-            color: #999;
+            border-top: 1px solid var(--border-light);
+            color: var(--text-muted);
             font-size: 13px;
         }
 
         .footer a {
-            color: #999;
+            color: var(--text-muted);
             text-decoration: none;
             margin: 0 15px;
             transition: color 0.2s;
         }
 
         .footer a:hover {
-            color: #666;
+            color: var(--text-secondary);
         }
 
         .footer .version-info {
@@ -357,18 +530,18 @@
         }
 
         .footer .version-info a {
-            color: #ff7b2e;
+            color: var(--accent);
         }
 
         .footer .version-info a:hover {
-            color: #ff6b1e;
+            color: var(--accent-hover);
         }
 
         /* Tabs */
         .tabs {
             display: flex;
             gap: 0;
-            border-bottom: 2px solid #e0e0e0;
+            border-bottom: 2px solid var(--border-light);
             margin: 20px 0;
         }
 
@@ -377,7 +550,7 @@
             padding: 12px;
             border: none;
             background: none;
-            color: #666;
+            color: var(--text-secondary);
             font-size: 14px;
             cursor: pointer;
             border-bottom: 2px solid transparent;
@@ -386,12 +559,12 @@
         }
 
         .tab-button:hover {
-            color: #ff7b2e;
+            color: var(--accent);
         }
 
         .tab-button.active {
-            color: #ff7b2e;
-            border-bottom-color: #ff7b2e;
+            color: var(--accent);
+            border-bottom-color: var(--accent);
             font-weight: 500;
         }
 
@@ -413,11 +586,18 @@
 
         .history-select {
             padding: 8px 12px;
-            border: 1px solid #ddd;
+            border: 1px solid var(--border-color);
             border-radius: 6px;
             font-size: 14px;
-            background: white;
+            background: var(--bg-card);
+            color: var(--text-primary);
             cursor: pointer;
+        }
+
+        .history-error {
+            color: var(--text-error);
+            padding: 20px;
+            text-align: center;
         }
 
         .chart-container {
@@ -429,7 +609,10 @@
 </head>
 <body>
     <div class="container">
-        <h1 id="home-name">Tado Local</h1>
+        <div class="header">
+            <h1 id="home-name">Tado Local</h1>
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+        </div>
         
         <div class="status-bar" id="status-bar" style="display: none;">
             <div class="status-item">
@@ -514,7 +697,7 @@
                     <canvas id="history-chart"></canvas>
                 </div>
                 <div id="history-loading" class="loading" style="display: none;">Loading history...</div>
-                <div id="history-error" style="display: none; color: #c62828; padding: 20px; text-align: center;"></div>
+                <div id="history-error" class="history-error" style="display: none;"></div>
             </div>
         </div>
     </div>
@@ -646,6 +829,19 @@
                 loadingEl.style.display = 'none';
                 
                 const ctx = canvas.getContext('2d');
+                const styles = getComputedStyle(document.documentElement);
+                const chartColors = {
+                    temp: styles.getPropertyValue('--chart-temp').trim(),
+                    tempBg: styles.getPropertyValue('--chart-temp-bg').trim(),
+                    target: styles.getPropertyValue('--chart-target').trim(),
+                    targetBg: styles.getPropertyValue('--chart-target-bg').trim(),
+                    humidity: styles.getPropertyValue('--chart-humidity').trim(),
+                    humidityBg: styles.getPropertyValue('--chart-humidity-bg').trim(),
+                    heatingBg: styles.getPropertyValue('--chart-heating-bg').trim(),
+                    grid: styles.getPropertyValue('--chart-grid').trim(),
+                    text: styles.getPropertyValue('--chart-text').trim()
+                };
+
                 historyChart = new Chart(ctx, {
                     type: 'line',
                     data: {
@@ -654,20 +850,20 @@
                             {
                                 label: 'Heating Active (background)',
                                 data: heatingActiveData,
-                                backgroundColor: 'rgba(255, 87, 34, 0.15)',
+                                backgroundColor: chartColors.heatingBg,
                                 borderColor: 'transparent',
                                 stepped: 'before',
                                 borderWidth: 0,
                                 pointRadius: 0,
                                 fill: 'origin',
                                 yAxisID: 'y2',
-                                order: 10  // Draw first (behind everything)
+                                order: 10
                             },
                             {
                                 label: 'Current Temp',
                                 data: tempData,
-                                borderColor: '#2196F3',
-                                backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                                borderColor: chartColors.temp,
+                                backgroundColor: chartColors.tempBg,
                                 stepped: 'before',
                                 borderWidth: 2,
                                 pointRadius: 0,
@@ -678,8 +874,8 @@
                             {
                                 label: 'Target Temp',
                                 data: targetTempData,
-                                borderColor: '#FF7B2E',
-                                backgroundColor: 'rgba(255, 123, 46, 0.1)',
+                                borderColor: chartColors.target,
+                                backgroundColor: chartColors.targetBg,
                                 stepped: 'before',
                                 borderWidth: 2,
                                 borderDash: [5, 5],
@@ -692,8 +888,8 @@
                             {
                                 label: 'Humidity',
                                 data: humidityData,
-                                borderColor: '#4CAF50',
-                                backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                                borderColor: chartColors.humidity,
+                                backgroundColor: chartColors.humidityBg,
                                 stepped: 'before',
                                 borderWidth: 2,
                                 pointRadius: 0,
@@ -715,8 +911,8 @@
                                 display: true,
                                 position: 'bottom',
                                 labels: {
+                                    color: chartColors.text,
                                     filter: function(item) {
-                                        // Hide the heating background from legend
                                         return !item.text.includes('background');
                                     }
                                 }
@@ -724,11 +920,10 @@
                             tooltip: {
                                 callbacks: {
                                     label: function(context) {
-                                        // Don't show tooltip for heating background
                                         if (context.dataset.label && context.dataset.label.includes('background')) {
                                             return null;
                                         }
-                                        
+
                                         let label = context.dataset.label || '';
                                         if (label) {
                                             label += ': ';
@@ -757,8 +952,12 @@
                                     }
                                 },
                                 ticks: {
+                                    color: chartColors.text,
                                     maxRotation: 45,
                                     minRotation: 45
+                                },
+                                grid: {
+                                    color: chartColors.grid
                                 }
                             },
                             y: {
@@ -767,7 +966,14 @@
                                 position: 'left',
                                 title: {
                                     display: true,
-                                    text: 'Temperature (°C)'
+                                    text: 'Temperature (\u00B0C)',
+                                    color: chartColors.text
+                                },
+                                ticks: {
+                                    color: chartColors.text
+                                },
+                                grid: {
+                                    color: chartColors.grid
                                 },
                                 beginAtZero: false
                             },
@@ -777,7 +983,11 @@
                                 position: 'right',
                                 title: {
                                     display: true,
-                                    text: 'Humidity (%)'
+                                    text: 'Humidity (%)',
+                                    color: chartColors.text
+                                },
+                                ticks: {
+                                    color: chartColors.text
                                 },
                                 min: 0,
                                 max: 100,
@@ -843,24 +1053,25 @@
                 
                 // Update cloud status
                 const cloudStatusEl = document.getElementById('cloud-status');
+                cloudStatusEl.className = 'status-value';
                 if (data.cloud_api) {
                     if (data.cloud_api.authenticated) {
                         cloudStatusEl.textContent = 'Connected';
-                        cloudStatusEl.style.color = '#4caf50';
+                        cloudStatusEl.classList.add('cloud-connected');
                     } else if (data.cloud_api.authentication_required) {
                         if (data.cloud_api.verification_uri) {
-                            cloudStatusEl.innerHTML = `<a href="${data.cloud_api.verification_uri}" target="_blank" style="color: #ff9642;">Authenticate</a>`;
+                            cloudStatusEl.innerHTML = `<a href="${data.cloud_api.verification_uri}" target="_blank" class="cloud-pending">Authenticate</a>`;
                         } else {
                             cloudStatusEl.textContent = 'Not authenticated';
-                            cloudStatusEl.style.color = '#ff9642';
+                            cloudStatusEl.classList.add('cloud-pending');
                         }
                     } else {
                         cloudStatusEl.textContent = 'Disabled';
-                        cloudStatusEl.style.color = '#999';
+                        cloudStatusEl.classList.add('cloud-disabled');
                     }
                 } else {
                     cloudStatusEl.textContent = 'Unavailable';
-                    cloudStatusEl.style.color = '#999';
+                    cloudStatusEl.classList.add('cloud-disabled');
                 }
 
                 // Detect cloud authentication change
@@ -1122,26 +1333,20 @@
         function showError(message) {
             const errorDiv = document.getElementById('error-message');
             errorDiv.textContent = message;
+            errorDiv.className = 'error';
             errorDiv.style.display = 'block';
-            errorDiv.style.background = '#ffebee';
-            errorDiv.style.color = '#c62828';
             setTimeout(() => {
                 errorDiv.style.display = 'none';
-                errorDiv.style.background = '';
-                errorDiv.style.color = '';
             }, 5000);
         }
 
         function showSuccess(message) {
             const errorDiv = document.getElementById('error-message');
             errorDiv.textContent = message;
+            errorDiv.className = 'error success';
             errorDiv.style.display = 'block';
-            errorDiv.style.background = '#e8f5e9';
-            errorDiv.style.color = '#388e3c';
             setTimeout(() => {
                 errorDiv.style.display = 'none';
-                errorDiv.style.background = '';
-                errorDiv.style.color = '';
             }, 5000);
         }
 
@@ -1262,6 +1467,45 @@
                 }
             }
         });
+
+        // Theme toggle
+        function getEffectiveTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved) return saved;
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                document.getElementById('theme-toggle').textContent = '\u2600\uFE0F';
+            } else {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('theme-toggle').textContent = '\uD83C\uDF19';
+            }
+            // Rebuild chart if visible so colors update
+            if (historyChart && currentZone) {
+                const hours = parseInt(document.getElementById('history-period').value);
+                loadHistory(currentZone.zone_id, hours);
+            }
+        }
+
+        document.getElementById('theme-toggle').addEventListener('click', () => {
+            const current = getEffectiveTheme();
+            const next = current === 'dark' ? 'light' : 'dark';
+            localStorage.setItem('theme', next);
+            applyTheme(next);
+        });
+
+        // Apply saved theme on load (if any)
+        const savedTheme = localStorage.getItem('theme');
+        if (savedTheme) {
+            applyTheme(savedTheme);
+        } else {
+            // Let CSS media query handle it, but set toggle icon correctly
+            document.getElementById('theme-toggle').textContent =
+                window.matchMedia('(prefers-color-scheme: dark)').matches ? '\u2600\uFE0F' : '\uD83C\uDF19';
+        }
 
         // Initialize
         loadZones();
