@@ -173,13 +173,14 @@
         h1 {
             color: var(--text-primary);
             font-weight: 400;
+            width: 100%;
         }
 
         .theme-toggle {
             background: none;
             border: 2px solid var(--border-color);
             border-radius: 8px;
-            padding: 6px 10px;
+            padding: 10px 10px;
             cursor: pointer;
             font-size: 18px;
             line-height: 1;
@@ -287,16 +288,40 @@
         }
 
         .flame-icon {
-            position: absolute;
-            top: 15px;
-            right: 15px;
             font-size: 24px;
-            animation: flicker 1.5s infinite alternate;
+            animation: flicker 2s infinite alternate;
+        }
+        
+        .window-toggle {
+            background: none;
+            border: 2px solid var(--border-color);
+            border-radius: 8px;
+            padding: 6px 10px;
+            cursor: pointer;
+            line-height: 1;
+            transition: border-color 0.2s;
+        }
+
+        .window-toggle:hover {
+            border-color: var(--accent);
+        }
+        .window-icon {
+            height: 30px;
+        }
+
+        .zone-activity-icons {
+            display: flex;
+            position: absolute;
+            top: 16px;
+            flex-direction: column;
+            align-items: center;
+            align-self: flex-end; 
         }
 
         @keyframes flicker {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.8; }
+            0% { opacity: 0.7; transform: scale(1); }
+            50% { opacity: 1; transform: scale(0.7); }
+            100% { opacity: 1; transform: scale(1); }
         }
 
         /* Modal */
@@ -473,11 +498,7 @@
             color: var(--battery-low);
             font-size: 12px;
             margin-top: 5px;
-        }
-        .window-open {
-            color: #ff5252;
-            font-size: 12px;
-            margin-top: 5px;
+            font-weight: 600;
         }
         
         .status-bar {
@@ -606,11 +627,82 @@
             margin-bottom: 20px;
         }
     </style>
+    <svg aria-hidden="true" id="svgdefs" version="2" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+            <symbol id="window-open" viewBox="0 0 64 64" fill="none"  stroke="currentColor" stroke-width="2.5" 
+                stroke-linecap="round" stroke-linejoin="round" role="img">
+                <rect x="9" y="9" width="46" height="40" rx="2" stroke="SandyBrown" stroke-width="5"/>
+                <rect x="7" y="7" width="50" height="44" rx="3"/>
+                <rect x="12" y="12" width="40" height="34" rx="2"/>
+                <!-- Left glass + frame -->
+                <path d="M12 12 L24 16 L24 40 L12 46 Z" fill="blue" style="fill-opacity:0.4"/>
+                <line x1="14" y1="29" x2="24" y2="29"/>
+                <!-- Right glass + frame -->
+                <path d="M52 12 L40 16 L40 40 L52 46 Z" fill="blue" style="fill-opacity:0.4"/>
+                <line x1="40" y1="29" x2="50" y2="29"/>
+                <!-- Hinges -->
+                <line x1="12" y1="18" x2="14" y2="19"/>
+                <line x1="12" y1="40" x2="14" y2="39"/>
+                <line x1="52" y1="18" x2="50" y2="19"/>
+                <line x1="52" y1="40" x2="50" y2="39"/>
+                <!-- Windowsill -->
+                <line x1="4" y1="52" x2="60" y2="52"/>
+                <line x1="4" y1="53" x2="60" y2="53"/>
+            </symbol>
+            <symbol id="window-closed" viewBox="0 0 64 64"  fill="none"  stroke="currentColor" stroke-width="2.5"
+                 stroke-linecap="round" stroke-linejoin="round" role="img">
+                <!-- Outer wall/frame -->
+                <rect x="9" y="9" width="46" height="40" rx="2" stroke="SandyBrown" stroke-width="5"/>
+                <rect x="7" y="7" width="50" height="44" rx="3"/>
+                <rect x="12" y="12" width="40" height="34" rx="2"  fill="blue" style="fill-opacity:0.4"/>
+                <!-- Glass bars -->
+                <line x1="12" y1="12" x2="12" y2="46"/>
+                <line x1="14" y1="29" x2="50" y2="29"/>
+                <line x1="32" y1="13" x2="32" y2="45" stroke-width="4"/>
+                <line x1="52" y1="12" x2="52" y2="46"/>
+                <!-- Hinges -->
+                <line x1="12" y1="19" x2="16" y2="19"/>
+                <line x1="12" y1="39" x2="16" y2="39"/>
+                <line x1="52" y1="19" x2="48" y2="19"/>
+                <line x1="52" y1="39" x2="48" y2="39"/>
+                <!-- Windowsill -->
+                <line x1="4" y1="52" x2="60" y2="52"/>
+                <line x1="4" y1="53" x2="60" y2="53"/>
+            </symbol>
+            <symbol id="window-disabled" viewBox="0 0 64 64" fill="none"  stroke="currentColor" stroke-width="2.5" 
+                stroke-linecap="round" stroke-linejoin="round" role="img">
+                <rect x="9" y="9" width="46" height="40" rx="2" stroke="SandyBrown" stroke-width="5"/>
+                <rect x="7" y="7" width="50" height="44" rx="3"/>
+                <rect x="12" y="12" width="40" height="34" rx="2"/>
+                <!-- Left glass + frame -->
+                <path d="M12 12 L24 16 L24 40 L12 46 Z" fill="blue" style="fill-opacity:0.4"/>
+                <line x1="14" y1="29" x2="24" y2="29"/>
+                <!-- Right glass + frame -->
+                <path d="M52 12 L40 16 L40 40 L52 46 Z" fill="blue" style="fill-opacity:0.4"/>
+                <line x1="40" y1="29" x2="50" y2="29"/>
+                <!-- Hinges -->
+                <line x1="12" y1="18" x2="14" y2="19"/>
+                <line x1="12" y1="40" x2="14" y2="39"/>
+                <line x1="52" y1="18" x2="50" y2="19"/>
+                <line x1="52" y1="40" x2="50" y2="39"/>
+                <!-- Windowsill -->
+                <line x1="4" y1="52" x2="60" y2="52"/>
+                <line x1="4" y1="53" x2="60" y2="53"/>
+                <!-- Red cross to indicate disabled -->
+                <line x1="4" y1="4" x2="60" y2="56" stroke="var(--text-error)" stroke-width="7" />
+                <line x1="4" y1="56" x2="60" y2="4" stroke="var(--text-error)" stroke-width="7" />
+            </symbol>
+        </defs>
+    </svg>
+
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1 id="home-name">Tado Local</h1>
+            <button class="window-toggle" id="window-toggle" title="Toggle show open window-status" aria-label="Toggle show open window-status">
+                <svg width="25" height="25" version="2.0" style="color: gray"><use id="window-toggle-icon" href="#window-open" /></svg>
+            </button>
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
         </div>
         
@@ -712,6 +804,7 @@
     let historyChart = null;
     let lastCloudAuthState = null;
     let statusPollInterval = null;
+    let showWindowStatus = "open-only"; // "show", "hide", "open-only"
 
         // Lazy load Chart.js and date adapter when history tab is first opened
         async function loadChartJs() {
@@ -1172,7 +1265,11 @@
                 const mode = state.mode || 0;
                 const curHeating = state.cur_heating || 0;
                 const batteryLow = state.battery_low;
-                const windowOpen = state.window_open || false;
+
+                let windowStatus = "hide";
+                if (state.window_open !== null && state.window_open !== undefined) {
+                    windowStatus = state.window_open ?  "open" : "closed";
+                }
                 
                 // Format temperature with one decimal, split for styling
                 let tempHtml = '--';
@@ -1216,10 +1313,21 @@
                 // Show icon based on cur_heating state
                 // 0 = off (no icon), 1 = heating (flame), 2 = cooling (frost/snowflake)
                 let activityIcon = '';
+                                
+                // Show icon based on window open status if enabled
+                if (windowStatus != "hide") {
+                    let showWindowOpenStatus = windowStatus != "hide" &&
+                        ((showWindowStatus == "show") || (showWindowStatus == "open-only" && windowStatus == "open"));
+                    activityIcon += '<div class="window-icon"' 
+                    activityIcon += (showWindowOpenStatus ? "" : ' style="display: none;"');
+                    activityIcon += '><svg width="40" height="36" version="2.0"><use href="#window-' + (windowStatus == "open" ? "open" : "closed") 
+                    activityIcon += '" /></svg></div>';
+                }
+
                 if (curHeating === 1) {
-                    activityIcon = '<div class="flame-icon">🔥</div>';
+                    activityIcon += '<div class="flame-icon">🔥</div>';
                 } else if (curHeating === 2) {
-                    activityIcon = '<div class="flame-icon">❄️</div>';
+                    activityIcon += '<div class="flame-icon">❄️</div>';
                 }
                 
                 // Format humidity if available
@@ -1236,7 +1344,9 @@
 
                 return `
                     <div class="${cardClass}" data-zone-id="${zone.zone_id}" onclick="openZoneModal(${zone.zone_id})">
+                        <div class="zone-activity-icons">
                         ${activityIcon}
+                        </div>
                         <div>
                             <div class="zone-temp">${tempHtml}<span class="zone-temp-unit">°</span></div>
                             <div class="zone-name">${zone.name}</div>
@@ -1244,7 +1354,6 @@
                             ${humidityHtml}
                             ${comfortHtml}
                             ${batteryLow ? '<div class="battery-low">⚠️ Low battery</div>' : ''}
-                            ${windowOpen ? '<div class="window-open">🪟 WINDOW OPEN</div>' : ''}
                         </div>
                     </div>
                 `;
@@ -1393,6 +1502,50 @@
             };
         }
 
+        // Theme toggle handlers
+        function getEffectiveTheme() {
+            const saved = localStorage.getItem('theme');
+            if (saved) return saved;
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+
+        function applyTheme(theme) {
+            if (theme === 'dark') {
+                document.documentElement.setAttribute('data-theme', 'dark');
+                document.getElementById('theme-toggle').textContent = '\u2600\uFE0F';
+            } else {
+                document.documentElement.setAttribute('data-theme', 'light');
+                document.getElementById('theme-toggle').textContent = '\uD83C\uDF19';
+            }
+            // Rebuild chart if visible so colors update
+            if (historyChart && currentZone) {
+                const hours = parseInt(document.getElementById('history-period').value);
+                loadHistory(currentZone.zone_id, hours);
+            }
+        }
+
+        // Handle Window status toggle
+        function applyWindowStatus() {
+            document.getElementById('window-toggle-icon').setAttribute("href", showWindowStatus == "show" ? '#window-closed' :
+                         (showWindowStatus == "hide" ? '#window-disabled' :'#window-open'));
+            
+            document.querySelectorAll('.window-icon').forEach(icon => {
+                // Show or hide window status icons based on setting, and if "open-only", only show when window is open
+                if (showWindowStatus == "show") {
+                    icon.style.display = 'block';
+                } else if (showWindowStatus == "open-only") {
+                        stat = icon.getElementsByTagName('use')[0].getAttribute("href");
+                        if (stat === '#window-open') {
+                            icon.style.display = 'block';
+                        } else {
+                            icon.style.display = 'none';
+                        }
+                } else {
+                    icon.style.display = 'none';
+                }
+            });
+        }
+
         // Event listeners
         document.getElementById('temp-up').addEventListener('click', () => {
             if (tempValue < 30) {
@@ -1468,28 +1621,21 @@
             }
         });
 
-        // Theme toggle
-        function getEffectiveTheme() {
-            const saved = localStorage.getItem('theme');
-            if (saved) return saved;
-            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
+        // Add Window status toggle listener
+        document.getElementById('window-toggle').addEventListener('click', () => {
+            showWindowStatus = showWindowStatus == "hide" ? "show" : showWindowStatus == "show" ? "open-only" : "hide";
+            localStorage.setItem('windowStatus', showWindowStatus);
+            applyWindowStatus();
+        });
 
-        function applyTheme(theme) {
-            if (theme === 'dark') {
-                document.documentElement.setAttribute('data-theme', 'dark');
-                document.getElementById('theme-toggle').textContent = '\u2600\uFE0F';
-            } else {
-                document.documentElement.setAttribute('data-theme', 'light');
-                document.getElementById('theme-toggle').textContent = '\uD83C\uDF19';
-            }
-            // Rebuild chart if visible so colors update
-            if (historyChart && currentZone) {
-                const hours = parseInt(document.getElementById('history-period').value);
-                loadHistory(currentZone.zone_id, hours);
-            }
+        // Init showWindowStatus from localStorage 
+        showWindowStatus = localStorage.getItem('windowStatus'); // 'show', 'hide' or 'open-only'
+        if (!showWindowStatus) {
+            showWindowStatus = 'open-only';  // default to "open-only" if not set
         }
+        applyWindowStatus();
 
+        // Add theme toggle listener
         document.getElementById('theme-toggle').addEventListener('click', () => {
             const current = getEffectiveTheme();
             const next = current === 'dark' ? 'light' : 'dark';

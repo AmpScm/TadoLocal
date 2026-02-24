@@ -35,12 +35,12 @@ logger = logging.getLogger(__name__)
 
 class TadoLocalAPI:
     """Tado Local that leverages HomeKit for real-time data without cloud dependency."""
-    accessories_cache : List[Any]
-    accessories_dict : Dict[str, Any]
-    accessories_id : Dict[int, str]
-    characteristic_map : Dict[tuple[int, int], str]
-    characteristic_iid_map : Dict[tuple[int, str], int]
-    device_to_characteristics : Dict[int, List[tuple[int, int, str]]]  # device_id -> [(aid, iid, char_type)]
+    accessories_cache: List[Any]
+    accessories_dict: Dict[str, Any]
+    accessories_id: Dict[int, str]
+    characteristic_map: Dict[tuple[int, int], str]
+    characteristic_iid_map: Dict[tuple[int, str], int]
+    device_to_characteristics: Dict[int, List[tuple[int, int, str]]]  # device_id -> [(aid, iid, char_type)]
 
     def __init__(self, db_path: str):
         self.pairing: Optional[IpPairing] = None
@@ -151,7 +151,7 @@ class TadoLocalAPI:
             raise HTTPException(status_code=503, detail=f"Failed to refresh accessories: {e}")
 
     def _process_raw_accessories(self, raw_accessories):
-        accessories={}
+        accessories = {}
 
         for a in raw_accessories:
             aid = a.get('aid')
@@ -276,7 +276,6 @@ class TadoLocalAPI:
 
         logger.info(f"Device state initialization complete - baseline established for {len(self.device_to_characteristics)} devices")
 
-
     async def setup_event_listeners(self):
         """Setup unified change detection with events + polling comparison."""
         if not self.pairing:
@@ -332,7 +331,7 @@ class TadoLocalAPI:
             logger.info("Setting up persistent event system...")
 
             # Register unified change handler for events
-            def event_callback(update_data : dict[tuple[int, int], dict]):
+            def event_callback(update_data: dict[tuple[int, int], dict]):
                 """Handle ALL HomeKit characteristic updates."""
                 logger.debug(f"Event callback received update: {update_data}")
                 for k, v in update_data.items():
@@ -423,7 +422,6 @@ class TadoLocalAPI:
                 if not char_name:
                     char_name = f"{aid}.{iid}"
 
-
             # Check if this is actually a change
             last_value = self.change_tracker['last_values'].get(char_key)
             if last_value == value:
@@ -478,7 +476,7 @@ class TadoLocalAPI:
                 # Format log message: show zone name, only add device detail if not zone leader
                 if is_zone_leader:
                     # Check for window open/close based on leader updates
-                    self._handle_window_open_detection(device_id, device_info, char_type)  
+                    self._handle_window_open_detection(device_id, device_info, char_type)
                     # Zone leader - just show zone name
                     logger.info(f"[{src}] {zone_name} | {char_name}: {last_value} -> {value}")
                 else:
@@ -489,8 +487,10 @@ class TadoLocalAPI:
             # Don't send raw characteristic events anymore - we'll send aggregated state changes
 
             # Broadcast aggregated state change for relevant characteristics
-            if char_name in ['TargetTemperature', 'CurrentTemperature', 'TargetHeatingCoolingState',
-                            'CurrentHeatingCoolingState', 'CurrentRelativeHumidity', 'ValvePosition']:
+            if char_name in [
+                        'TargetTemperature', 'CurrentTemperature', 'TargetHeatingCoolingState',
+                        'CurrentHeatingCoolingState', 'CurrentRelativeHumidity', 'ValvePosition'
+                    ]:
                 await self.broadcast_state_change(device_id, zone_name)
 
         except Exception as e:
@@ -508,54 +508,55 @@ class TadoLocalAPI:
                     return
 
                 zone_name = device_info.get('zone_name', 'No Zone')
-                
+
                 # Simple heuristic: if temperature drops significantly within time threshold, a window open is asumed
-                #temp_change_threshold = 2.0  # degrees Celsius
-                #temp_drop_time_threshold = 10  # minutes
+                # temp_change_threshold = 2.0  # degrees Celsius
+                # temp_drop_time_threshold = 10  # minutes
                 temp_change_threshold = 1.0  # degrees Celsius
                 temp_change_time_threshold = 20  # minutes
 
                 # Get old values from database of the last temp_drop_time_threshold minutes to compare trends
-                history =  self.state_manager.get_device_history_info(device_id, age=temp_change_time_threshold)
-                
+                history = self.state_manager.get_device_history_info(device_id, age=temp_change_time_threshold)
+
                 # history structure: history_count, earliest_entry (temp, window, window_lastupdate), latest_entry (temp, window, window_lastupdate)
                 if not history or history['history_count'] < 1:
                     # No data, just ignore
                     return
-                
+
                 # calculate time difference from latest entry to see how long the window has been open/closed/rest
                 time_diff = (time.time() - int(history['latest_entry'][2])) // 60
                 current_window_state = leader_state.get('window')
-                
+
                 # If window is currently open (1) and has been open for longer than the open time threshold, set it to rest (2)
                 if current_window_state == 1 and time_diff > device_info.get('window_open_time', 15):
                     logger.info(f"[Window] {zone_name} | Window set to close again, being open over {time_diff:.0f} mins")
                     # Consider it closed again -> put in rest (2) state to avoid rapid open/close detection
-                    self.state_manager.update_device_window_status(device_id, 2)  
+                    self.state_manager.update_device_window_status(device_id, 2)
                     self._cancel_window_close_timer(device_id)
                     return
 
                 if history['history_count'] < 2:
                     # Temperature drop is to slow to call it an open window
-                    logger.info(f"[Window] {zone_name} | Not enough readings (only {history['history_count']} entry in last {temp_change_time_threshold} minutes)")
-                    return  
-                
-                mode = leader_state.get('cur_heating', 0) # (0=Off, 1=Heating, 2=Cooling) 
+                    logger.info(f"[Window] {zone_name} | Not enough readings (only {history['history_count']} " +
+                                f"entry in last {temp_change_time_threshold} minutes)")
+                    return
+
+                mode = leader_state.get('cur_heating', 0)   # (0=Off, 1=Heating, 2=Cooling)
                 if mode == 2:
-                    temp_change = history['latest_entry'][0] - history[' earliest_entry'][0]
-                    logger.info(f"[Window] {zone_name} | cooling | Window status {current_window_state} for {time_diff:.0f} mins | Temp rise {temp_change:.1f}")
+                    # In cooling mode, calculate temp _rise_ (lastest - earlier) as temp_change
+                    temp_change = history['latest_entry'][0] - history['earliest_entry'][0]
+                    logger.info(f"[Window] {zone_name} | cooling | Window status {current_window_state} " +
+                                f"for {time_diff:.0f} mins | Temp rise {temp_change:.1f}")
                 else:
+                    # In heating mode, calculate temp _drop_ (earlier - lastest) as temp_change
                     temp_change = history['earliest_entry'][0] - history['latest_entry'][0]
-                    logger.info(f"[Window] {zone_name} | heating | Window status {current_window_state} for {time_diff:.0f} mins | Temp drop {temp_change:.1f}")
+                    logger.info(f"[Window] {zone_name} | heating | Window status {current_window_state} " +
+                                f"for {time_diff:.0f} mins | Temp drop {temp_change:.1f}")
 
                 # check if window is currently closed (0) or in rest (2) long enough to consider it closed again
-                if current_window_state == 0  or (current_window_state == 2 and time_diff > device_info.get('window_rest_time', 15)):
-                    if mode == 2:
-                        # In cooling mode, a significant temp _rise_ is likely to be caused by an open window
-                        window_status = 1 if temp_change <= temp_change_threshold else 0
-                    else:
-                        # In heating mode, a significant temp _drop_ is likely to be caused by an open window
-                        window_status = 1 if temp_change >= temp_change_threshold else 0
+                if current_window_state == 0 or (current_window_state == 2 and time_diff > device_info.get('window_rest_time', 15)):
+                    # A significant temp _rise_ is likely to be caused by an open window
+                    window_status = 1 if temp_change >= temp_change_threshold else 0
 
                     # Update state manager with window status
                     self.state_manager.update_device_window_status(device_id, window_status)
@@ -610,7 +611,7 @@ class TadoLocalAPI:
             zone_name = device_info.get('zone_name', 'No Zone')
             logger.info(f"[Window] {zone_name} | Window set to close again")
             # Consider it closed again -> put in rest state (2) to avoid rapid open/close detection
-            self.state_manager.update_device_window_status(device_id, 2)  
+            self.state_manager.update_device_window_status(device_id, 2)
 
         except asyncio.CancelledError:
             return
@@ -618,7 +619,6 @@ class TadoLocalAPI:
             logger.error(f"Window closing error for device {device_id}: {e}")
             return
 
-            
     async def broadcast_event(self, event_data):
         """Broadcast change event to all connected SSE clients."""
         try:
@@ -738,8 +738,10 @@ class TadoLocalAPI:
                     # Apply circuit driver logic for heating states (using cache)
                     if is_circuit_driver:
                         # Circuit driver - check radiator valves in zone (from cache)
-                        other_devices = [dev_id for dev_id, dev_info in self.state_manager.device_info_cache.items()
-                                        if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')]
+                        other_devices = [
+                                    dev_id for dev_id, dev_info in self.state_manager.device_info_cache.items()
+                                    if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')
+                                ]
 
                         if other_devices:
                             for valve_id in other_devices:

@@ -280,6 +280,7 @@ TADO_CHARACTERISTICS = {
     "E44673A0-247B-4360-8A76-DB9DA69C0101": "TadoProprietaryControl",
 }
 
+
 def get_service_name(uuid: str) -> str:
     """Convert HomeKit service UUID to human-readable name."""
     # Normalize UUID to uppercase for lookup
@@ -289,6 +290,7 @@ def get_service_name(uuid: str) -> str:
     if uuid_upper in TADO_SERVICES:
         return TADO_SERVICES[uuid_upper]
     return HOMEKIT_SERVICES.get(uuid_upper, uuid)
+
 
 def get_characteristic_name(uuid: str) -> str:
     """Convert HomeKit characteristic UUID to human-readable name."""
@@ -300,11 +302,13 @@ def get_characteristic_name(uuid: str) -> str:
         return TADO_CHARACTERISTICS[uuid_upper]
     return HOMEKIT_CHARACTERISTICS.get(uuid_upper, uuid)
 
+
 def get_characteristic_value_name(characteristic_name: str, value) -> str:
     """Convert HomeKit characteristic value to human-readable name."""
     if characteristic_name in HOMEKIT_VALUES and value in HOMEKIT_VALUES[characteristic_name]:
         return HOMEKIT_VALUES[characteristic_name][value]
     return str(value)
+
 
 def enhance_accessory_data(accessories):
     """
@@ -372,6 +376,7 @@ def enhance_accessory_data(accessories):
         enhanced.append(enhanced_accessory)
 
     return enhanced
+
 
 def add_tado_specific_info(enhanced_char, char_name, value):
     """Add Tado-specific interpretations for characteristics."""

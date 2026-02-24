@@ -24,6 +24,7 @@ from typing import Dict, List, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+
 class DeviceStateManager:
     """Manages device state tracking, history, and change detection."""
 
@@ -92,7 +93,8 @@ class DeviceStateManager:
          FROM devices d
          LEFT JOIN zones z ON d.zone_id = z.zone_id
         """)
-        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, battery_state, tado_zone_id, window_open_time, window_rest_time in cursor.fetchall():
+        for device_id, serial_number, aid, name, device_type, zone_id, zone_name, is_zone_leader, is_circuit_driver, \
+                battery_state, tado_zone_id, window_open_time, window_rest_time in cursor.fetchall():
             self.device_id_cache[serial_number] = device_id
             if aid:
                 self.aid_to_device_id[aid] = device_id
@@ -119,15 +121,16 @@ class DeviceStateManager:
         cursor = conn.execute("""
             SELECT z.zone_id, z.name, z.leader_device_id, z.order_id,
                    d.serial_number as leader_serial, d.device_type as leader_type,
-                   z.tado_zone_id, 
+                   z.tado_zone_id,
                    d.is_circuit_driver, z.uuid,
-                   z.window_open_time, z.window_rest_time                        
+                   z.window_open_time, z.window_rest_time
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
-        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, uuid_val, window_open_time, window_rest_time in cursor.fetchall():
+        for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, \
+                uuid_val, window_open_time, window_rest_time in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
@@ -138,7 +141,7 @@ class DeviceStateManager:
                 'leader_type': leader_type,
                 'is_circuit_driver': bool(is_circuit_driver),
                 'uuid': uuid_val,
-                'window_open_time': window_open_time, 
+                'window_open_time': window_open_time,
                 'window_rest_time': window_rest_time
             }
 
@@ -420,7 +423,7 @@ class DeviceStateManager:
                 target_humidity = COALESCE(excluded.target_humidity, target_humidity),
                 active_state = COALESCE(excluded.active_state, active_state),
                 valve_position = COALESCE(excluded.valve_position, valve_position),
-                window = COALESCE(excluded.window, window), 
+                window = COALESCE(excluded.window, window),
                 window_lastupdate = COALESCE(excluded.window_lastupdate, window_lastupdate),
                 updated_at = CURRENT_TIMESTAMP
         """, (
@@ -598,10 +601,10 @@ class DeviceStateManager:
         conn = sqlite3.connect(self.db_path)
 
         cursor = conn.execute("""
-            SELECT d.device_id, d.serial_number, d.aid, d.device_type, d.name, 
-                    d.model, d.manufacturer, d.firmware_version, d.zone_id, 
-                    z.name as zone_name, d.is_zone_leader, d.is_circuit_driver, 
-                    d.battery_state, d.first_seen, d.last_seen 
+            SELECT d.device_id, d.serial_number, d.aid, d.device_type, d.name,
+                    d.model, d.manufacturer, d.firmware_version, d.zone_id,
+                    z.name as zone_name, d.is_zone_leader, d.is_circuit_driver,
+                    d.battery_state, d.first_seen, d.last_seen
             FROM devices d
             LEFT JOIN zones z ON d.zone_id = z.zone_id
             ORDER BY device_id
@@ -625,7 +628,7 @@ class DeviceStateManager:
 
     def get_device_history_info(self, device_id: int, age: int) -> Dict[str, Any]:
         """Get metadata about a device's history (earliest and latest timestamps)."""
-        
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.execute("""
                 SELECT current_temperature, window, window_lastupdate
@@ -649,7 +652,7 @@ class DeviceStateManager:
             'latest_entry': None,
             'earliest_entry': None,
         }
-    
+
     def update_device_window_status(self, device_id: int, window_open: int):
         """
         Update the window open/closed status for a device.
@@ -669,5 +672,3 @@ class DeviceStateManager:
 
             self._save_to_history(device_id, time.time())
             logger.info(f"Device {device_id} window status updated: {old_status} -> {window_open}")
-
-

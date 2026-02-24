@@ -243,10 +243,10 @@ def ensure_schema_and_migrate(db_path: str):
             conn.execute("BEGIN IMMEDIATE")
             try:
                 # SQLite throws "duplicate column name" if it already exists, so we can just attempt to add and ignore if it fails
-                conn.execute(f"ALTER TABLE 'device_state_history' ADD COLUMN 'window' INTEGER NOT NULL DEFAULT 0")
-                conn.execute(f"ALTER TABLE 'device_state_history' ADD COLUMN 'window_lastupdate' TIMESTAMP")
-                conn.execute(f"ALTER TABLE 'zones' ADD COLUMN 'window_open_time' INTEGER NOT NULL DEFAULT 30")
-                conn.execute(f"ALTER TABLE 'zones' ADD COLUMN 'window_rest_time' INTEGER NOT NULL DEFAULT 15")
+                conn.execute("ALTER TABLE 'device_state_history' ADD COLUMN 'window' INTEGER NOT NULL DEFAULT 0")
+                conn.execute("ALTER TABLE 'device_state_history' ADD COLUMN 'window_lastupdate' TIMESTAMP")
+                conn.execute("ALTER TABLE 'zones' ADD COLUMN 'window_open_time' INTEGER NOT NULL DEFAULT 30")
+                conn.execute("ALTER TABLE 'zones' ADD COLUMN 'window_rest_time' INTEGER NOT NULL DEFAULT 15")
             except Exception:
                 # Column may already exist depending on prior runs
                 pass
