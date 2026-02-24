@@ -1807,7 +1807,9 @@ class TestBaseAPIHandling:
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/svg+xml"
         assert response.content.startswith(b"<svg")
-        assert response.content.endswith(b"</svg>\r\n")
+        # to satify Windows vs Linux line ending differences in the SVG file
+        assert response.content.endswith(b"</svg>\r\n") or \
+                response.content.endswith(b"</svg>\n")
 
     def test_get_robots_txt_returns_disallow_all(self, client):
         """Test GET /robots.txt returns disallow all."""
@@ -1815,7 +1817,10 @@ class TestBaseAPIHandling:
 
         assert response.status_code == 200
         assert response.headers["content-type"] == "text/plain; charset=utf-8"
-        assert "User-agent: *\r\nDisallow: /\r\n" in response.text
+        # to satify Windows vs Linux line ending differences in the robots.txt file
+        assert "User-agent: *\r\nDisallow: /\r\n" in response.text or \
+                "User-agent: *\nDisallow: /\n" in response.text
+
 
     def test_get_robots_txt_fallback_when_missing(self, monkeypatch):
         """Test GET /robots.txt returns fallback when file is missing."""
