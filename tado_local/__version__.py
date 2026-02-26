@@ -32,4 +32,4 @@
 # - 1.1.1: Bug fix update
 # - 2.0.0: Major breaking change
 
-__version__ = "1.0.0-alpha1"
+__version__ = "1.1.0"
