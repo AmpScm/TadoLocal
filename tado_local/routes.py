@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, status
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi.responses import StreamingResponse, FileResponse, PlainTextResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 
@@ -43,6 +43,7 @@ security = HTTPBearer(auto_error=False)
 # Multiple keys can be specified, space-separated
 API_KEYS_RAW = os.environ.get('TADO_API_KEYS', '').strip()
 API_KEYS = set(key.strip() for key in API_KEYS_RAW.split() if key.strip()) if API_KEYS_RAW else set()
+
 
 def get_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[str]:
     """
@@ -149,8 +150,8 @@ def register_routes(app: FastAPI, get_tado_api):
         if robots_file.exists():
             return FileResponse(robots_file, media_type="text/plain")
         else:
-            # Fallback if file not found
-            return "User-agent: *\nDisallow: /\n", {"Content-Type": "text/plain"}
+            # Fallback if file not found (make sure is sent as plain text not json)
+            return PlainTextResponse("User-agent: *\nDisallow: /\n")
 
     @app.get("/.well-known/{path:path}", include_in_schema=False)
     async def well_known(path: str):
@@ -460,8 +461,10 @@ def register_routes(app: FastAPI, get_tado_api):
 
         # Use cached zone info (no DB query)
         # Sort by order_id (treating None as 999, but 0 is valid), then by name
-        for zone_id, zone_info in sorted(tado_api.state_manager.zone_cache.items(),
-                                          key=lambda x: (999 if x[1].get('order_id') is None else x[1].get('order_id'), x[1].get('name'))):
+        for zone_id, zone_info in sorted(
+                        tado_api.state_manager.zone_cache.items(),
+                        key=lambda x: (999 if x[1].get('order_id') is None else x[1].get('order_id'), x[1].get('name'))
+                ):
             name = zone_info['name']
             leader_device_id = zone_info['leader_device_id']
             order_id = zone_info['order_id']
@@ -469,10 +472,14 @@ def register_routes(app: FastAPI, get_tado_api):
             leader_type = zone_info['leader_type']
             is_circuit_driver = zone_info['is_circuit_driver']
             tado_zone_id = zone_info['tado_zone_id']
+            window_open_time = zone_info['window_open_time']
+            window_rest_time = zone_info['window_rest_time']
 
             # Get device count for this zone (quick loop through device cache)
-            device_count = sum(1 for dev_info in tado_api.state_manager.device_info_cache.values()
-                              if dev_info.get('zone_id') == zone_id)
+            device_count = sum(
+                    1 for dev_info in tado_api.state_manager.device_info_cache.values()
+                    if dev_info.get('zone_id') == zone_id
+                )
 
             # Get zone state from leader (with optimistic updates for UI responsiveness)
             # Note: Individual devices always show real state. Only zone aggregation uses optimistic state.
@@ -495,6 +502,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 humidity = zone_state.get('humidity')
                 target_temp = zone_state.get('target_temperature')
                 target_heating_cooling_state = zone_state.get('target_heating_cooling_state', 0)
+                window_open = (zone_state.get('window') == 1)
 
                 # Mode: Always from zone leader's target_heating_cooling_state (with optimistic updates)
                 mode = target_heating_cooling_state
@@ -503,8 +511,10 @@ def register_routes(app: FastAPI, get_tado_api):
                 cur_heating = 0
                 if is_circuit_driver:
                     # Circuit driver - check if there are other devices (radiator valves) in zone
-                    other_devices = [dev_id for dev_id, dev_info in tado_api.state_manager.device_info_cache.items()
-                                    if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')]
+                    other_devices = [
+                            dev_id for dev_id, dev_info in tado_api.state_manager.device_info_cache.items()
+                            if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')
+                        ]
 
                     if other_devices:
                         # Circuit driver WITH other devices - use radiator valve heating state (real state)
@@ -532,6 +542,7 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_f': target_temp_f,
                     'mode': mode,
                     'cur_heating': cur_heating,
+                    'window_open': window_open,
                 }
             else:
                 state_summary = {
@@ -542,6 +553,7 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_f': None,
                     'mode': 0,
                     'cur_heating': 0,
+                    'window_open': None,
                 }
 
             zones.append({
@@ -555,6 +567,8 @@ def register_routes(app: FastAPI, get_tado_api):
                 'is_circuit_driver': bool(is_circuit_driver),
                 'order_id': order_id,
                 'device_count': device_count,
+                'window_open_time': window_open_time,
+                'window_rest_time': window_rest_time,
                 'state': state_summary
             })
 
@@ -623,10 +637,14 @@ def register_routes(app: FastAPI, get_tado_api):
         leader_type = zone_info['leader_type']
         is_circuit_driver = zone_info['is_circuit_driver']
         tado_zone_id = zone_info['tado_zone_id']
+        window_open_time = zone_info['window_open_time']
+        window_rest_time = zone_info['window_rest_time']
 
         # Get device count for this zone (quick loop through device cache)
-        device_count = sum(1 for dev_info in tado_api.state_manager.device_info_cache.values()
-                            if dev_info.get('zone_id') == zone_id)
+        device_count = sum(
+                            1 for dev_info in tado_api.state_manager.device_info_cache.values()
+                            if dev_info.get('zone_id') == zone_id
+                        )
 
         # Get zone state from leader (with optimistic updates for UI responsiveness)
         # Note: Individual devices always show real state. Only zone aggregation uses optimistic state.
@@ -649,6 +667,7 @@ def register_routes(app: FastAPI, get_tado_api):
             humidity = zone_state.get('humidity')
             target_temp = zone_state.get('target_temperature')
             target_heating_cooling_state = zone_state.get('target_heating_cooling_state', 0)
+            window_open = (zone_state.get('window') == 1)
 
             # Mode: Always from zone leader's target_heating_cooling_state (with optimistic updates)
             mode = target_heating_cooling_state
@@ -657,8 +676,10 @@ def register_routes(app: FastAPI, get_tado_api):
             cur_heating = 0
             if is_circuit_driver:
                 # Circuit driver - check if there are other devices (radiator valves) in zone
-                other_devices = [dev_id for dev_id, dev_info in tado_api.state_manager.device_info_cache.items()
-                                if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')]
+                other_devices = [
+                        dev_id for dev_id, dev_info in tado_api.state_manager.device_info_cache.items()
+                        if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')
+                    ]
 
                 if other_devices:
                     # Circuit driver WITH other devices - use radiator valve heating state (real state)
@@ -686,6 +707,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_f': target_temp_f,
                 'mode': mode,
                 'cur_heating': cur_heating,
+                'window_open': window_open
             }
         else:
             state_summary = {
@@ -696,6 +718,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_f': None,
                 'mode': 0,
                 'cur_heating': 0,
+                'window_open': None,
             }
 
         zone = {
@@ -709,6 +732,8 @@ def register_routes(app: FastAPI, get_tado_api):
             'is_circuit_driver': bool(is_circuit_driver),
             'order_id': order_id,
             'device_count': device_count,
+            'window_open_time': window_open_time,
+            'window_rest_time': window_rest_time,
             'state': state_summary
         }
 
@@ -736,7 +761,12 @@ def register_routes(app: FastAPI, get_tado_api):
         }
 
     @app.post("/zones", tags=["Zones"])
-    async def create_zone(name: str, leader_device_id: Optional[int] = None, order_id: Optional[int] = None, api_key: Optional[str] = Depends(get_api_key)):
+    async def create_zone(
+                    name: str,
+                    leader_device_id: Optional[int] = None,
+                    order_id: Optional[int] = None,
+                    api_key: Optional[str] = Depends(get_api_key)
+                ):
         """Create a new zone."""
         tado_api = get_tado_api()
         if not tado_api:
@@ -757,13 +787,17 @@ def register_routes(app: FastAPI, get_tado_api):
         return {'zone_id': zone_id, 'name': name}
 
     @app.put("/zones/{zone_id}", tags=["Zones"])
-    async def update_zone(zone_id: int, name: Optional[str] = None, leader_device_id: Optional[int] = None, order_id: Optional[int] = None, api_key: Optional[str] = Depends(get_api_key)):
+    async def update_zone(
+                zone_id: int,
+                name: Optional[str] = None,
+                leader_device_id: Optional[int] = None,
+                order_id: Optional[int] = None,
+                api_key: Optional[str] = Depends(get_api_key)
+            ):
         """Update a zone."""
         tado_api = get_tado_api()
         if not tado_api:
             raise HTTPException(status_code=503, detail="API not initialized")
-
-        conn = sqlite3.connect(tado_api.state_manager.db_path)
 
         updates = []
         params = []
@@ -780,24 +814,29 @@ def register_routes(app: FastAPI, get_tado_api):
         if not updates:
             raise HTTPException(status_code=400, detail="No updates provided")
 
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
         params.append(zone_id)
         conn.execute(f"UPDATE zones SET {', '.join(updates)} WHERE zone_id = ?", params)
+        updated = (conn.total_changes > 0)
         conn.commit()
         conn.close()
+
+        if not updated:
+            raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found or no changes made")
 
         # Reload device cache
         tado_api.state_manager._load_device_cache()
 
-        return {'zone_id': zone_id, 'updated': True}
+        return {'zone_id': zone_id, 'updated': updated}
 
     @app.post("/zones/{zone_id}/set", tags=["Zones"])
     async def set_zone(
-        zone_id: int,
-        temperature: Optional[float] = None,
-        heating_enabled: Optional[bool] = None,
-        no_implicit_mode: Optional[bool] = False,
-        api_key: Optional[str] = Depends(get_api_key)
-        ):
+                zone_id: int,
+                temperature: Optional[float] = None,
+                heating_enabled: Optional[bool] = None,
+                no_implicit_mode: Optional[bool] = False,
+                api_key: Optional[str] = Depends(get_api_key)
+             ):
         """
         Control a zone's heating via its leader device.
 
@@ -956,6 +995,66 @@ def register_routes(app: FastAPI, get_tado_api):
         except Exception as e:
             logger.error(f"Failed to control zone {zone_id}: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to set zone control: {str(e)}")
+
+    @app.post("/zones/{zone_id}/windowtimeouts", tags=["Zones"])
+    async def set_zone_window_timeouts(
+                zone_id: int,
+                window_open_time: Optional[int] = None,
+                window_rest_time: Optional[int] = None,
+                api_key: Optional[str] = Depends(get_api_key)
+            ):
+        """
+        Set the open window timeout for a specific zone.
+        Args:
+            window_open_time: window open timeout in minutes (1-480, or -1 to reset to default: 30)
+            window_rest_time: window rest timeout in minutes (1-480, or -1 to reset to default: 15)
+
+        Returns:
+            Success status and applied values
+        """
+        # Log the incoming request
+        logger.info(f"POST /zones/{zone_id}/set window_open_time={window_open_time} window_rest_time={window_rest_time}")
+
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+
+        if not tado_api.pairing:
+            raise HTTPException(status_code=503, detail="Bridge not connected")
+
+        if zone_id not in tado_api.state_manager.zone_cache:
+            raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
+
+        # Apply smart defaults
+        if window_open_time is None and window_rest_time is None:
+            raise HTTPException(status_code=400, detail="No control parameters provided")
+
+        updates = []
+        params = []
+
+        if window_open_time is not None:
+            if window_open_time < -1 or window_open_time > 480:
+                raise HTTPException(status_code=400, detail="window_open_time must be between 1 and 480 minutes, or -1 to reset to default")
+            updates.append("window_open_time = ?")
+            params.append(int(window_open_time) if window_open_time > 0 else 30)
+
+        if window_rest_time is not None:
+            if window_rest_time < -1 or window_rest_time > 480:
+                raise HTTPException(status_code=400, detail="window_rest_time must be between 1 and 480 minutes, or -1 to reset to default")
+            updates.append("window_rest_time = ?")
+            params.append(int(window_rest_time) if window_rest_time > 0 else 15)
+
+        # Update the zone's window timeout settings in the database
+        params.append(zone_id)
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        conn.execute(f"UPDATE zones SET {', '.join(updates)} WHERE zone_id = ?", params)
+        conn.commit()
+        conn.close()
+
+        # Reload zone cache
+        tado_api.state_manager._load_zone_cache()
+
+        return {'zone_id': zone_id, 'updated': True}
 
     @app.get("/devices", tags=["Devices"])
     async def get_devices(api_key: Optional[str] = Depends(get_api_key)):
@@ -1648,11 +1747,13 @@ def register_routes(app: FastAPI, get_tado_api):
                     logger.info(f"Synced {len(devices)} devices (battery status)")
 
                 # Sync to database
-                await sync.sync_all(cloud_api,
-                                  home_data=False,  # Skip
-                                  zones_data=False,  # Skip
-                                  zone_states_data=zone_states,
-                                  devices_data=devices)
+                await sync.sync_all(
+                        cloud_api,
+                        home_data=False,  # Skip
+                        zones_data=False,  # Skip
+                        zone_states_data=zone_states,
+                        devices_data=devices
+                    )
 
                 result['refreshed'] = ['battery_status', 'device_status']
             else:
@@ -1671,11 +1772,13 @@ def register_routes(app: FastAPI, get_tado_api):
                     result['devices_synced'] = len(devices)
 
                 # Sync to database
-                await sync.sync_all(cloud_api,
-                                  home_data=home_info,
-                                  zones_data=zones,
-                                  zone_states_data=zone_states,
-                                  devices_data=devices)
+                await sync.sync_all(
+                        cloud_api,
+                        home_data=home_info,
+                        zones_data=zones,
+                        zone_states_data=zone_states,
+                        devices_data=devices
+                    )
 
                 result['refreshed'] = ['home_info', 'zones', 'battery_status', 'device_status']
 

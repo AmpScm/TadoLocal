@@ -59,6 +59,8 @@ CREATE TABLE IF NOT EXISTS zones (
     zone_type TEXT,
     leader_device_id INTEGER,
     order_id INTEGER,
+    window_open_time INTEGER,
+    window_rest_time INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (tado_home_id) REFERENCES tado_homes(tado_home_id) ON DELETE CASCADE,
@@ -110,6 +112,8 @@ CREATE TABLE IF NOT EXISTS device_state_history (
     target_humidity REAL,
     active_state INTEGER,
     valve_position INTEGER,
+    window INTEGER,
+    window_lastupdate TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (device_id, timestamp_bucket),
     FOREIGN KEY (device_id) REFERENCES devices(device_id) ON DELETE CASCADE
@@ -168,7 +172,7 @@ def ensure_schema_and_migrate(db_path: str):
     # Supported schema version for this codebase. If the database reports a
     # higher user_version we should refuse to start to avoid silent data loss
     # or incompatible assumptions.
-    SUPPORTED_SCHEMA_VERSION = 2
+    SUPPORTED_SCHEMA_VERSION = 3
 
     # Open connection and check current schema version before applying changes
     conn = sqlite3.connect(db_path)
@@ -222,6 +226,33 @@ def ensure_schema_and_migrate(db_path: str):
 
             conn.execute("PRAGMA user_version = 2")
             current_version = 2
+            conn.commit()
+        except Exception:
+            # Rollback any partial changes on error
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+            raise
+
+    # Migration to version 3: add window detection columns to zones for new window detection features;
+    # these can be added without data backfill so we can just add and move on
+    if current_version < 3:
+        try:
+            # Use explicit transaction to ensure atomic migration
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                # SQLite throws "duplicate column name" if it already exists, so we can just attempt to add and ignore if it fails
+                conn.execute("ALTER TABLE 'device_state_history' ADD COLUMN 'window' INTEGER NOT NULL DEFAULT 0")
+                conn.execute("ALTER TABLE 'device_state_history' ADD COLUMN 'window_lastupdate' TIMESTAMP")
+                conn.execute("ALTER TABLE 'zones' ADD COLUMN 'window_open_time' INTEGER NOT NULL DEFAULT 30")
+                conn.execute("ALTER TABLE 'zones' ADD COLUMN 'window_rest_time' INTEGER NOT NULL DEFAULT 15")
+            except Exception:
+                # Column may already exist depending on prior runs
+                pass
+
+            conn.execute("PRAGMA user_version = 3")
+            current_version = 3
             conn.commit()
         except Exception:
             # Rollback any partial changes on error

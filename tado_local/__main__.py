@@ -44,6 +44,7 @@ tado_api: Optional[TadoLocalAPI] = None
 server: Optional[uvicorn.Server] = None
 shutdown_event: Optional[asyncio.Event] = None
 
+
 async def run_server(args):
     """Run the Tado Local server."""
     global bridge_pairing, tado_api, server, shutdown_event
@@ -136,6 +137,7 @@ async def run_server(args):
                 logger.debug("Attempting to import zeroconf_register for mDNS registration")
                 from .zeroconf_register import register_service_async
                 logger.info("mDNS registration helper loaded")
+
                 async def _schedule_mdns():
                     # Register a single HTTP service so basic clients can discover the API.
                     # We intentionally publish only the HTTP service to avoid duplicate
@@ -179,10 +181,9 @@ async def run_server(args):
         else:
             logger.info("mDNS registration disabled by --no-mdns flag")
 
-
         server_ip = get_primary_ipv4() or "0.0.0.0"
 
-        logger.info( "*** Tado Local ready! ***")
+        logger.info("*** Tado Local ready! ***")
         logger.info(f"Bridge IP: {bridge_ip}")
         logger.info(f"API Server: http://{server_ip}:{args.port}")
         logger.info(f"Documentation: http://{server_ip}:{args.port}/docs")
@@ -342,6 +343,7 @@ async def run_server(args):
         # Forced exit after 3 seconds to avoid lingering connections (especially for browsers)
         import threading
         import sys
+
         def force_exit():
             logger.warning("Forcing process exit after 3 seconds to avoid lingering SSE connections.")
             os._exit(0)
@@ -351,6 +353,7 @@ async def run_server(args):
         else:
             threading.Timer(3.0, force_exit).start()
             logger.info("Shutdown complete. Process will exit in 3 seconds.")
+
 
 def main():
     """Main entry point for the CLI."""
@@ -394,26 +397,46 @@ API Endpoints:
   POST /refresh        - Manually refresh data
         """
     )
-    parser.add_argument("--state", default="~/.tado-local.db",
-                       help="Path to state database (default: ~/.tado-local.db)")
-    parser.add_argument("--no-mdns", action="store_true",
-                       help="Disable mDNS/Avahi/zeroconf service registration at startup")
-    parser.add_argument("--bridge-ip",
-                       help="IP of the Tado bridge (e.g., 192.168.1.100). If not provided, will auto-discover from existing pairings.")
-    parser.add_argument("--pin",
-                       help="HomeKit PIN for initial pairing (XXX-XX-XXX format)")
-    parser.add_argument("--port", type=int, default=4407,
-                       help="Port for REST API server (default: 4407)")
-    parser.add_argument("--clear-pairings", action="store_true",
-                       help="Clear all existing pairings from database before starting")
-    parser.add_argument("--verbose", action="store_true",
-                       help="Enable verbose logging (DEBUG level)")
-    parser.add_argument("--daemon", action="store_true",
-                       help="Run in daemon mode (structured logging for syslog, auto-enables --pid-file)")
-    parser.add_argument("--syslog",
-                       help="Send logs to syslog instead of stdout (e.g., /dev/log, localhost:514, or remote.server:514)")
-    parser.add_argument("--pid-file",
-                       help="Write process ID to specified file (useful for daemon mode)")
+    parser.add_argument(
+           "--state", default="~/.tado-local.db",
+           help="Path to state database (default: ~/.tado-local.db)"
+        )
+    parser.add_argument(
+            "--no-mdns", action="store_true",
+            help="Disable mDNS/Avahi/zeroconf service registration at startup"
+        )
+    parser.add_argument(
+            "--bridge-ip",
+            help="IP of the Tado bridge (e.g., 192.168.1.100). If not provided, will auto-discover from existing pairings."
+        )
+    parser.add_argument(
+            "--pin",
+            help="HomeKit PIN for initial pairing (XXX-XX-XXX format)"
+        )
+    parser.add_argument(
+            "--port", type=int, default=4407,
+            help="Port for REST API server (default: 4407)"
+        )
+    parser.add_argument(
+            "--clear-pairings", action="store_true",
+            help="Clear all existing pairings from database before starting"
+        )
+    parser.add_argument(
+            "--verbose", action="store_true",
+            help="Enable verbose logging (DEBUG level)"
+        )
+    parser.add_argument(
+            "--daemon", action="store_true",
+            help="Run in daemon mode (structured logging for syslog, auto-enables --pid-file)"
+        )
+    parser.add_argument(
+            "--syslog",
+            help="Send logs to syslog instead of stdout (e.g., /dev/log, localhost:514, or remote.server:514)"
+        )
+    parser.add_argument(
+            "--pid-file",
+            help="Write process ID to specified file (useful for daemon mode)"
+        )
     # Parse CLI arguments
     args = parser.parse_args()
 
@@ -498,6 +521,7 @@ API Endpoints:
     except Exception as e:
         logger.error(f"ERROR: {e}")
         exit(1)
+
 
 if __name__ == "__main__":
     main()

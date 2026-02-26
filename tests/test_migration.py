@@ -32,7 +32,7 @@ def test_migration_adds_uuid_and_sets_user_version(tmp_path):
     conn = sqlite3.connect(db_file)
     cur = conn.execute("PRAGMA user_version")
     ver = cur.fetchone()[0]
-    assert ver == 2
+    assert ver == 3
 
     # Check uuid column exists and populated
     cur = conn.execute("PRAGMA table_info(zones)")
