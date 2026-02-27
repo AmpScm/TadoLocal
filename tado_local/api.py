@@ -543,7 +543,7 @@ class TadoLocalAPI:
         """Detect window open/close based on leader device temperature update."""
         try:
             # Only check for window open/close if the characteristic is relevant (temperature changes in leader)
-            if char_type.lower() in [DeviceStateManager.CHAR_CURRENT_TEMPERATURE]:
+            if char_type and char_type.lower() in [DeviceStateManager.CHAR_CURRENT_TEMPERATURE]:
                 # Get current state for leader device
                 leader_state = self.state_manager.get_current_state(device_id)
                 if not leader_state:
