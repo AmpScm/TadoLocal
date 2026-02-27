@@ -482,14 +482,20 @@ class TadoLocalAPI:
 
             # Update device state manager
             if device_id:
-                # Find the accessory by aid (since events come with aid, not device_id)
+                # Find the accessory matching BOTH aid and device_id to avoid
+                # collisions when bridge and standalone share the same aid.
                 accessory = None
                 for acc in self.accessories_cache:
-                    if acc.get('aid') == aid:
+                    if acc.get('aid') == aid and acc.get('id') == device_id:
                         accessory = acc
                         break
+                if not accessory:
+                    for acc in self.accessories_cache:
+                        if acc.get('aid') == aid:
+                            accessory = acc
+                            break
 
-                if accessory and accessory.get('id'):
+                if accessory:
                     # Find the characteristic type for this aid/iid
                     char_type = None
                     for service in accessory.get('services', []):
@@ -502,10 +508,10 @@ class TadoLocalAPI:
 
                     if char_type:
                         field_name, old_val, new_val = self.state_manager.update_device_characteristic(
-                            accessory['id'], char_type, value, timestamp
+                            device_id, char_type, value, timestamp
                         )
                         if field_name:
-                            logger.debug(f"Updated device {accessory['id']} {field_name}: {old_val} -> {new_val}")
+                            logger.debug(f"Updated device {device_id} {field_name}: {old_val} -> {new_val}")
 
             # Skip logging during initialization
             if not self.is_initializing:
