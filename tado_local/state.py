@@ -443,7 +443,7 @@ class DeviceStateManager:
             state.get('target_humidity'),
             state.get('active_state'),
             state.get('valve_position'),
-            state.get('window'),
+            state.get('window', 0),
             state.get('window_lastupdate')
         ))
         conn.commit()

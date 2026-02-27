@@ -567,7 +567,10 @@ class TadoLocalAPI:
                     return
 
                 # calculate time difference from latest entry to see how long the window has been open/closed/rest
-                time_diff = (time.time() - int(history['latest_entry'][2])) // 60
+                latest_window_ts = history['latest_entry'][2]
+                if latest_window_ts is None:
+                    return
+                time_diff = (time.time() - int(latest_window_ts)) // 60
                 current_window_state = leader_state.get('window')
 
                 # If window is currently open (1) and has been open for longer than the open time threshold, set it to rest (2)

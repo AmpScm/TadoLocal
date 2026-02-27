@@ -324,8 +324,10 @@ class TadoCloudSync:
 
             updated_count = 0
 
-            entries = device_list_data.get('entries', [])
+            entries = device_list_data.get('entries', []) if isinstance(device_list_data, dict) else device_list_data or []
             for entry in entries:
+                if not entry or not isinstance(entry, dict):
+                    continue
                 device = entry.get('device')
                 if not device:
                     continue
@@ -338,7 +340,7 @@ class TadoCloudSync:
                 firmware = device.get('currentFwVersion')
                 raw_device_type = device.get('deviceType')
                 device_type = normalize_device_type(raw_device_type) if raw_device_type else None
-                zone_info = entry.get('zone', {})
+                zone_info = entry.get('zone') or {}
                 tado_zone_id = zone_info.get('discriminator')
 
                 # Check if device exists
