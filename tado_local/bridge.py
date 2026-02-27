@@ -525,6 +525,82 @@ class TadoBridge:
         raise RuntimeError("No pairing data found and no PIN provided. Provide --pin to pair first.")
 
     @staticmethod
+    async def pair_or_load_accessory(accessory_ip: str, pin: Optional[str], db_path: Path):
+        """Load existing pairing or perform new pairing for a standalone accessory.
+
+        Unlike pair_or_load(), this targets a specific IP without auto-select
+        logic and stores the pairing in the same ``pairings`` table.  The
+        accessory is expected to be a standalone HomeKit device (e.g. Tado
+        Smart AC Control V3+) that is **not** behind the Internet Bridge.
+        """
+        db_str = str(db_path)
+        conn = sqlite3.connect(db_str)
+        conn.executescript(DB_SCHEMA)
+        conn.commit()
+
+        row = conn.execute(
+            "SELECT pairing_data FROM pairings WHERE bridge_ip = ?",
+            (accessory_ip,),
+        ).fetchone()
+
+        if row:
+            pairing_data = json.loads(row[0])
+            logger.info(f"Found existing accessory pairing for {accessory_ip}")
+
+            try:
+                char_cache = CharacteristicCacheSQLite(db_str)
+                controller = IpController(char_cache=char_cache, zeroconf_instance=None)
+                pairing = IpPairing(controller, pairing_data)
+                await pairing._ensure_connected()
+                accessories = await pairing.list_accessories_and_characteristics()
+                logger.info(
+                    f"Accessory {accessory_ip}: connected, {len(accessories)} accessory/ies"
+                )
+                conn.close()
+                return pairing, accessory_ip
+            except Exception as e:
+                logger.error(f"Accessory {accessory_ip}: connection failed ({e})")
+                conn.close()
+                raise RuntimeError(
+                    f"Failed to connect to accessory {accessory_ip}: {e}"
+                )
+
+        # No existing pairing — need a PIN
+        if not pin:
+            conn.close()
+            raise RuntimeError(
+                f"No existing pairing for accessory {accessory_ip} and no "
+                f"--accessory-pin provided.  Supply the HomeKit PIN for "
+                f"initial pairing."
+            )
+
+        logger.info(f"Starting fresh pairing with accessory {accessory_ip}...")
+        try:
+            pairing_data = await TadoBridge.perform_pairing_with_controller(
+                accessory_ip, 80, pin, db_str
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO pairings (bridge_ip, pairing_data) VALUES (?, ?)",
+                (accessory_ip, json.dumps(pairing_data)),
+            )
+            conn.commit()
+            logger.info(f"Accessory {accessory_ip}: pairing saved")
+
+            char_cache = CharacteristicCacheSQLite(db_str)
+            controller = IpController(char_cache=char_cache, zeroconf_instance=None)
+            pairing = IpPairing(controller, pairing_data)
+            await pairing._ensure_connected()
+            await pairing.list_accessories_and_characteristics()
+            logger.info(f"Accessory {accessory_ip}: connected after fresh pairing")
+
+            conn.close()
+            return pairing, accessory_ip
+        except Exception as e:
+            conn.close()
+            logger.error(f"Accessory {accessory_ip}: pairing failed ({e})")
+            raise
+
+    @staticmethod
     async def perform_pairing_with_controller(host: str, port: int, hap_pin: str, db_path: str):
         """
         Perform HomeKit pairing using Controller.start_pairing() method.

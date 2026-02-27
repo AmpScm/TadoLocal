@@ -44,6 +44,8 @@ class TadoLocalAPI:
 
     def __init__(self, db_path: str):
         self.pairing: Optional[IpPairing] = None
+        self.extra_pairings: List[IpPairing] = []
+        self.aid_to_pairing: Dict[int, IpPairing] = {}
         self.accessories_cache = []
         self.accessories_dict = {}
         self.accessories_id = {}
@@ -60,19 +62,22 @@ class TadoLocalAPI:
 
         # Cleanup tracking
         self.subscribed_characteristics: List[tuple[int, int]] = []
+        self.pairing_subscriptions: Dict[int, List[tuple[int, int]]] = {}
         self.background_tasks: List[asyncio.Task] = []
         self.window_close_timers: Dict[int, asyncio.Task] = {}
         self.is_shutting_down = False
 
-    async def initialize(self, pairing: IpPairing):
-        """Initialize the API with a HomeKit pairing."""
+    async def initialize(self, pairing: IpPairing, *, extra_pairings: Optional[List[IpPairing]] = None):
+        """Initialize the API with a HomeKit pairing and optional standalone accessories."""
         self.pairing = pairing
-        self.is_initializing = True  # Suppress change logging during init
+        self.extra_pairings = extra_pairings or []
+        self.is_initializing = True
         await self.refresh_accessories()
         await self.initialize_device_states()
-        self.is_initializing = False  # Re-enable change logging
+        self.is_initializing = False
         await self.setup_event_listeners()
-        logger.info("Tado Local initialized successfully")
+        n = 1 + len(self.extra_pairings)
+        logger.info(f"Tado Local initialized successfully ({n} pairing{'s' if n > 1 else ''})")
 
     async def cleanup(self):
         """Clean up resources and unsubscribe from events."""
@@ -99,14 +104,26 @@ class TadoLocalAPI:
             await asyncio.gather(*self.background_tasks, return_exceptions=True)
             logger.info("Background tasks cancelled")
 
-        # Unsubscribe from all event characteristics
-        if self.pairing and self.subscribed_characteristics:
+        # Unsubscribe from event characteristics on each pairing
+        all_pairings = [self.pairing] + self.extra_pairings
+        for pairing in all_pairings:
+            if not pairing:
+                continue
+            chars = self.pairing_subscriptions.get(id(pairing), [])
+            if not chars:
+                continue
             try:
-                logger.info(f"Unsubscribing from {len(self.subscribed_characteristics)} event characteristics")
-                await self.pairing.unsubscribe(self.subscribed_characteristics)
-                logger.info("Successfully unsubscribed from events")
+                logger.info(f"Unsubscribing {len(chars)} events from pairing {id(pairing)}")
+                await pairing.unsubscribe(chars)
             except Exception as e:
                 logger.warning(f"Error during unsubscribe: {e}")
+
+        # Close standalone accessory pairings
+        for extra in self.extra_pairings:
+            try:
+                await extra.close()
+            except Exception as e:
+                logger.warning(f"Error closing standalone pairing: {e}")
 
         # Close all event listener queues
         if self.event_listeners:
@@ -142,9 +159,27 @@ class TadoLocalAPI:
         try:
             raw_accessories = await self.pairing.list_accessories_and_characteristics()
             self.accessories_dict = self._process_raw_accessories(raw_accessories)
+            for a in raw_accessories:
+                aid = a.get('aid')
+                if aid is not None:
+                    self.aid_to_pairing[aid] = self.pairing
+
+            for extra in self.extra_pairings:
+                try:
+                    extra_raw = await extra.list_accessories_and_characteristics()
+                    extra_dict = self._process_raw_accessories(extra_raw)
+                    self.accessories_dict.update(extra_dict)
+                    for a in extra_raw:
+                        aid = a.get('aid')
+                        if aid is not None:
+                            self.aid_to_pairing[aid] = extra
+                    logger.info(f"Standalone accessory contributed {len(extra_dict)} device(s)")
+                except Exception as e:
+                    logger.error(f"Failed to refresh standalone accessory: {e}")
+
             self.accessories_cache = list(self.accessories_dict.values())
             self.last_update = time.time()
-            logger.info(f"Refreshed {len(self.accessories_cache)} accessories")
+            logger.info(f"Refreshed {len(self.accessories_cache)} accessories total")
             return self.accessories_cache
         except Exception as e:
             logger.error(f"Failed to refresh accessories: {e}")
@@ -247,32 +282,39 @@ class TadoLocalAPI:
 
         logger.info(f"Polling {len(chars_to_poll)} characteristics for initial state...")
 
-        # Poll in batches to avoid overwhelming the device
+        # Group by pairing so each is polled via its own connection
+        from collections import defaultdict as _dd
+        by_pairing: Dict[int, List] = _dd(list)
+        for item in chars_to_poll:
+            aid = item[0]
+            by_pairing[id(self.aid_to_pairing.get(aid, self.pairing))].append(item)
+
         batch_size = 10
         timestamp = time.time()
 
-        for i in range(0, len(chars_to_poll), batch_size):
-            batch = chars_to_poll[i:i+batch_size]
-            char_keys = [(aid, iid) for aid, iid, _, _ in batch]
+        for pairing_id, items in by_pairing.items():
+            pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
+            for i in range(0, len(items), batch_size):
+                batch = items[i:i+batch_size]
+                char_keys = [(aid, iid) for aid, iid, _, _ in batch]
 
-            try:
-                results = await self.pairing.get_characteristics(char_keys)
+                try:
+                    results = await pairing.get_characteristics(char_keys)
 
-                for (aid, iid, device_id, char_type) in batch:
-                    if (aid, iid) in results:
-                        char_data = results[(aid, iid)]
-                        value = char_data.get('value')
+                    for (aid, iid, device_id, char_type) in batch:
+                        if (aid, iid) in results:
+                            char_data = results[(aid, iid)]
+                            value = char_data.get('value')
 
-                        if value is not None:
-                            # Update device state
-                            field_name, old_val, new_val = self.state_manager.update_device_characteristic(
-                                device_id, char_type, value, timestamp
-                            )
-                            if field_name:
-                                logger.debug(f"Initialized device {device_id} {field_name}: {value}")
+                            if value is not None:
+                                field_name, old_val, new_val = self.state_manager.update_device_characteristic(
+                                    device_id, char_type, value, timestamp
+                                )
+                                if field_name:
+                                    logger.debug(f"Initialized device {device_id} {field_name}: {value}")
 
-            except Exception as e:
-                logger.error(f"Error polling batch during initialization: {e}")
+                except Exception as e:
+                    logger.error(f"Error polling batch during initialization: {e}")
 
         logger.info(f"Device state initialization complete - baseline established for {len(self.device_to_characteristics)} devices")
 
@@ -315,10 +357,9 @@ class TadoLocalAPI:
 
         logger.info(f"Initialized change tracker with {len(self.change_tracker['last_values'])} known values from database")
 
-        # Try to set up persistent event system
+        # Try to set up persistent event system for all pairings
         events_active = await self.setup_persistent_events()
 
-        # Only set up polling if events failed (no point polling if events work - it just hits cache)
         if not events_active:
             logger.warning("Events not available, falling back to polling")
             await self.setup_polling_system()
@@ -326,47 +367,49 @@ class TadoLocalAPI:
             logger.info("Events active, skipping polling (would just hit 3-hour cache)")
 
     async def setup_persistent_events(self):
-        """Set up persistent event subscriptions to all event characteristics."""
+        """Set up persistent event subscriptions across all pairings (bridge + standalone)."""
         try:
             logger.info("Setting up persistent event system...")
 
-            # Register unified change handler for events
-            def event_callback(update_data: dict[tuple[int, int], dict]):
-                """Handle ALL HomeKit characteristic updates."""
-                logger.debug(f"Event callback received update: {update_data}")
-                for k, v in update_data.items():
-                    asyncio.create_task(self.handle_change(k[0], k[1], v, source="EVENT"))
+            def _make_event_callback(source_label: str):
+                def event_callback(update_data: dict[tuple[int, int], dict]):
+                    logger.debug(f"Event ({source_label}) received: {update_data}")
+                    for k, v in update_data.items():
+                        asyncio.create_task(self.handle_change(k[0], k[1], v, source="EVENT"))
+                return event_callback
 
-            # Register the callback with the pairing's dispatcher
-            self.pairing.dispatcher_connect(event_callback)
-            logger.info("Event callback registered with dispatcher")
+            all_pairings = [self.pairing] + self.extra_pairings
+            total_subscribed = 0
 
-            # Collect ALL event-capable characteristics from ALL accessories
-            all_event_characteristics = []
+            for idx, pairing in enumerate(all_pairings):
+                label = "bridge" if idx == 0 else f"accessory-{idx}"
+                pairing.dispatcher_connect(_make_event_callback(label))
 
-            for accessory in self.accessories_cache:
-                aid = accessory.get('aid')
-                for service in accessory.get('services', []):
-                    for char in service.get('characteristics', []):
-                        perms = char.get('perms', [])
-                        if 'ev' in perms:  # Event notification supported
-                            iid = char.get('iid')
-                            char_type = char.get('type', '').lower()
+                chars_for_pairing = []
+                for accessory in self.accessories_cache:
+                    aid = accessory.get('aid')
+                    if self.aid_to_pairing.get(aid) is not pairing:
+                        continue
+                    for service in accessory.get('services', []):
+                        for char in service.get('characteristics', []):
+                            perms = char.get('perms', [])
+                            if 'ev' in perms:
+                                iid = char.get('iid')
+                                char_type = char.get('type', '').lower()
+                                chars_for_pairing.append((aid, iid))
+                                self.characteristic_map[(aid, iid)] = get_characteristic_name(char_type)
+                                self.characteristic_iid_map[(aid, get_characteristic_name(char_type))] = iid
+                                self.change_tracker['event_characteristics'].add((aid, iid))
 
-                            # Track what this characteristic is
-                            all_event_characteristics.append((aid, iid))
-                            self.characteristic_map[(aid, iid)] = get_characteristic_name(char_type)
-                            self.characteristic_iid_map[(aid,  get_characteristic_name(char_type))] = iid
-                            self.change_tracker['event_characteristics'].add((aid, iid))
+                if chars_for_pairing:
+                    await pairing.subscribe(chars_for_pairing)
+                    self.pairing_subscriptions[id(pairing)] = chars_for_pairing
+                    self.subscribed_characteristics.extend(chars_for_pairing)
+                    total_subscribed += len(chars_for_pairing)
+                    logger.info(f"Subscribed to {len(chars_for_pairing)} events on {label}")
 
-            if all_event_characteristics:
-                # Subscribe to ALL event characteristics at once - this is critical!
-                await self.pairing.subscribe(all_event_characteristics)
-                # Track subscriptions for cleanup
-                self.subscribed_characteristics = all_event_characteristics.copy()
-                logger.info(f"Subscribed to {len(all_event_characteristics)} event characteristics")
-                logger.debug(f"Characteristic map: {self.characteristic_map}")
-
+            if total_subscribed:
+                logger.info(f"Total event subscriptions: {total_subscribed}")
                 return True
             else:
                 logger.warning("No event-capable characteristics found")
@@ -863,30 +906,30 @@ class TadoLocalAPI:
 
     async def _poll_characteristics(self, char_list, source="POLLING"):
         """Poll a list of characteristics and process changes."""
-        # Poll in batches to avoid overwhelming the device
+        from collections import defaultdict as _dd
+        by_pairing: Dict[int, List] = _dd(list)
+        for item in char_list:
+            by_pairing[id(self.aid_to_pairing.get(item[0], self.pairing))].append(item)
+
         batch_size = 15
 
-        for i in range(0, len(char_list), batch_size):
-            batch = char_list[i:i+batch_size]
+        for pairing_id, items in by_pairing.items():
+            pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
+            for i in range(0, len(items), batch_size):
+                batch = items[i:i+batch_size]
 
-            try:
-                results = await self.pairing.get_characteristics(batch)
+                try:
+                    results = await pairing.get_characteristics(batch)
 
-                for aid, iid in batch:
-                    if (aid, iid) in results:
-                        char_data = results[(aid, iid)]
-                        value = char_data.get('value')
+                    for aid, iid in batch:
+                        if (aid, iid) in results:
+                            char_data = results[(aid, iid)]
+                            value = char_data.get('value')
+                            update_data = {'value': value}
+                            await self.handle_change(aid, iid, update_data, source)
 
-                        # Create proper update_data format for unified change handler
-                        update_data = {
-                            'value': value
-                        }
-
-                        # Use the unified change handler
-                        await self.handle_change(aid, iid, update_data, source)
-
-            except Exception as e:
-                logger.error(f"Error polling batch: {e}")
+                except Exception as e:
+                    logger.error(f"Error polling batch: {e}")
 
     async def handle_homekit_event(self, event_data):
         """Handle incoming HomeKit events and update device states."""
@@ -979,7 +1022,8 @@ class TadoLocalAPI:
         if not characteristics_to_set:
             raise ValueError("No valid characteristics to set")
 
-        # Set the characteristics
+        # Set the characteristics via the correct pairing
+        target_pairing = self.aid_to_pairing.get(aid, self.pairing)
         logger.debug(f"Sending to HomeKit: {characteristics_to_set}")
-        await self.pairing.put_characteristics(characteristics_to_set)
+        await target_pairing.put_characteristics(characteristics_to_set)
         return True

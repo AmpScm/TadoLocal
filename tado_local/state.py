@@ -275,6 +275,8 @@ class DeviceStateManager:
                 device_type = "radiator_valve"  # Smart Radiator Thermostat
             elif prefix == "WR":
                 device_type = "wireless_receiver"  # Extension Kit
+            elif prefix == "SU":
+                device_type = "smart_ac_control"  # Smart AC Control V3+
 
         # Create device entry
         conn = sqlite3.connect(self.db_path)
