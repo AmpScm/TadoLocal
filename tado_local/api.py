@@ -362,9 +362,13 @@ class TadoLocalAPI:
 
         if not events_active:
             logger.warning("Events not available, falling back to polling")
-            await self.setup_polling_system()
-        else:
-            logger.info("Events active, skipping polling (would just hit 3-hour cache)")
+
+        # Always enable polling as a safety net — standalone accessories
+        # (e.g. Smart AC Control) may not fire HomeKit temperature events
+        # even when subscribed, relying on cloud push instead.
+        await self.setup_polling_system()
+        if events_active:
+            logger.info("Events active; polling enabled as safety net for silent devices")
 
     async def setup_persistent_events(self):
         """Set up persistent event subscriptions across all pairings (bridge + standalone)."""
