@@ -249,10 +249,12 @@ class TadoCloudSync:
 
     def sync_zone_states_data(self, zone_states_data: List[Dict[str, Any]], home_id: int, tado_api: TadoLocalAPI) -> bool:
         """
-        Sync zone states from Tado Cloud API to update humidity.
+        Sync zone states from Tado Cloud API to update temperature and humidity.
 
-        The zoneStates_data endpoint provides additional device information including
-        link status, schedule information, geolocation that may not be available via HomeKit.
+        The zoneStates endpoint provides authoritative sensor data that supplements
+        HomeKit readings.  Standalone accessories (e.g. Smart AC Control V3+) may
+        not fire HomeKit temperature events reliably, so cloud values act as a
+        correction layer.
 
         Args:
             zone_states_data: Zone state response from Tado Cloud API
@@ -267,37 +269,46 @@ class TadoCloudSync:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            humidity_updates = 0
+            sensor_updates = 0
 
             zones = zone_states_data.get('zoneStates', {})
             for zone_id, zone_state in zones.items():
                 settings = zone_state.get('setting', {})
 
                 if not settings or settings.get('type') == 'HOT_WATER':
-                    continue  # Do not process HOT_WATER zones for now
+                    continue
 
-                sensoDataPoints = zone_state.get('sensorDataPoints', {})
-                humidity = str(sensoDataPoints.get('humidity', {}).get('percentage'))
+                sensor_data = zone_state.get('sensorDataPoints', {})
+                humidity = sensor_data.get('humidity', {}).get('percentage')
+                temperature = sensor_data.get('insideTemperature', {}).get('celsius')
 
-                if humidity != "None":
-                    logger.debug(f"Get all aids for zone: {zone_id}")
-                    # Get all devices of this zone to generate update humidity
-                    cursor.execute(f"SELECT aid FROM devices WHERE tado_zone_id = '{zone_id}'")
+                if humidity is None and temperature is None:
+                    continue
 
-                    for device in cursor.fetchall():
-                        # Get iid for this specific device(may be multiple devices in one zone with different iids)
-                        iid = tado_api.get_iid_from_characteristics(device[0], "CurrentRelativeHumidity") if device else None
+                logger.debug(f"Cloud sensor data for zone {zone_id}: temp={temperature}, hum={humidity}")
+                cursor.execute("SELECT aid FROM devices WHERE tado_zone_id = ?", (str(zone_id),))
 
-                        if device and iid:
-                            # Create an update event for humidity
-                            asyncio.create_task(tado_api.handle_change(device[0], iid, {'value': humidity}, source="POLLING"))
-                            logger.debug(f"Humidity change, generate event: ({device[0]}, {iid}) >> value = {humidity}")
-                            humidity_updates += 1
+                for device in cursor.fetchall():
+                    aid = device[0]
+                    if not aid:
+                        continue
+
+                    if humidity is not None:
+                        iid = tado_api.get_iid_from_characteristics(aid, "CurrentRelativeHumidity")
+                        if iid:
+                            asyncio.create_task(tado_api.handle_change(aid, iid, {'value': humidity}, source="POLLING"))
+                            sensor_updates += 1
+
+                    if temperature is not None:
+                        iid = tado_api.get_iid_from_characteristics(aid, "CurrentTemperature")
+                        if iid:
+                            asyncio.create_task(tado_api.handle_change(aid, iid, {'value': temperature}, source="POLLING"))
+                            sensor_updates += 1
 
             conn.commit()
             conn.close()
 
-            logger.info(f"Updated {humidity_updates} devices from zone states data")
+            logger.info(f"Cloud zone states: {sensor_updates} sensor updates applied")
             return True
 
         except Exception as e:
