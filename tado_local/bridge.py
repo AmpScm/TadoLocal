@@ -41,6 +41,8 @@ from .database import DB_SCHEMA
 
 logger = logging.getLogger(__name__)
 
+HOMEKIT_DEFAULT_PORT = 80
+
 
 class TadoBridge:
     """Manages HomeKit bridge pairing and connection."""
@@ -51,6 +53,7 @@ class TadoBridge:
 
         # Ensure DB schema and run migrations before using DB
         from .database import ensure_schema_and_migrate
+
         ensure_schema_and_migrate(db_path)
 
         conn = sqlite3.connect(db_path)
@@ -77,19 +80,14 @@ class TadoBridge:
 
             # Serialize keys for storage
             private_key_bytes = private_key.private_bytes(
-                encoding=serialization.Encoding.DER,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption()
+                encoding=serialization.Encoding.DER, format=serialization.PrivateFormat.PKCS8, encryption_algorithm=serialization.NoEncryption()
             )
-            public_key_bytes = public_key.public_bytes(
-                encoding=serialization.Encoding.DER,
-                format=serialization.PublicFormat.SubjectPublicKeyInfo
-            )
+            public_key_bytes = public_key.public_bytes(encoding=serialization.Encoding.DER, format=serialization.PublicFormat.SubjectPublicKeyInfo)
 
             # Store in database
             conn.execute(
                 "INSERT INTO controller_identity (controller_id, private_key, public_key) VALUES (?, ?, ?)",
-                (controller_id, private_key_bytes, public_key_bytes)
+                (controller_id, private_key_bytes, public_key_bytes),
             )
             conn.commit()
             conn.close()
@@ -108,7 +106,7 @@ class TadoBridge:
         # Save new session
         conn.execute(
             "INSERT INTO pairing_sessions (bridge_ip, controller_id, session_state, part1_salt, part1_public_key) VALUES (?, ?, ?, ?, ?)",
-            (bridge_ip, controller_id, "part1_complete", salt, public_key)
+            (bridge_ip, controller_id, "part1_complete", salt, public_key),
         )
         conn.commit()
         conn.close()
@@ -120,7 +118,7 @@ class TadoBridge:
         conn = sqlite3.connect(db_path)
         cursor = conn.execute(
             "SELECT controller_id, part1_salt, part1_public_key FROM pairing_sessions WHERE bridge_ip = ? AND session_state = 'part1_complete'",
-            (bridge_ip,)
+            (bridge_ip,),
         )
         row = cursor.fetchone()
         conn.close()
@@ -137,6 +135,20 @@ class TadoBridge:
         conn.execute("DELETE FROM pairing_sessions WHERE bridge_ip = ?", (bridge_ip,))
         conn.commit()
         conn.close()
+
+    @staticmethod
+    async def _connect_pairing(pairing_data: dict, db_path: str) -> tuple:
+        """Create an IpPairing from stored data, connect, and list accessories.
+
+        Returns:
+            (IpPairing, list of accessories)
+        """
+        char_cache = CharacteristicCacheSQLite(db_path)
+        controller = IpController(char_cache=char_cache, zeroconf_instance=None)
+        pairing = IpPairing(controller, pairing_data)
+        await pairing._ensure_connected()
+        accessories = await pairing.list_accessories_and_characteristics()
+        return pairing, accessories
 
     @staticmethod
     async def perform_pairing(host: str, port: int, pin: str, db_path: str = None):
@@ -380,9 +392,7 @@ class TadoBridge:
 
         if bridge_ip:
             # User specified a bridge IP, try to find that specific pairing
-            row = conn.execute(
-                "SELECT pairing_data FROM pairings WHERE bridge_ip = ?", (bridge_ip,)
-            ).fetchone()
+            row = conn.execute("SELECT pairing_data FROM pairings WHERE bridge_ip = ?", (bridge_ip,)).fetchone()
             if row:
                 pairing_data = json.loads(row[0])
                 selected_bridge_ip = bridge_ip
@@ -407,25 +417,8 @@ class TadoBridge:
         if pairing_data is not None:
             logger.info(f"=> Testing existing pairing for {selected_bridge_ip}...")
 
-            # Create a controller with proper async context
             try:
-                if False:
-                    zeroconf_instance = AsyncZeroconf()
-                else:
-                    zeroconf_instance = None
-
-                # Create SQLite-backed characteristic cache
-                char_cache = CharacteristicCacheSQLite(str(db_path))
-
-                # Create controller with proper dependencies
-                controller = IpController(char_cache=char_cache, zeroconf_instance=zeroconf_instance)
-
-                # Create pairing with controller instance
-                pairing = IpPairing(controller, pairing_data)
-
-                # Test connection
-                await pairing._ensure_connected()
-                accessories = await pairing.list_accessories_and_characteristics()
+                pairing, accessories = await TadoBridge._connect_pairing(pairing_data, str(db_path))
                 logger.info(f"Successfully connected to {selected_bridge_ip}!")
                 logger.info(f"Found {len(accessories)} accessories")
 
@@ -450,16 +443,8 @@ class TadoBridge:
             logger.info(f"Starting fresh pairing with {bridge_ip} using PIN {pin}...")
 
             try:
-                if False:
-                    zeroconf_instance = AsyncZeroconf()
-                else:
-                    zeroconf_instance = None
+                pairing_data = await TadoBridge.perform_pairing_with_controller(bridge_ip, HOMEKIT_DEFAULT_PORT, pin, str(db_path))
 
-                # Perform pairing using enhanced protocol with persistent controller identity
-                # Use the pairing data as returned by the protocol
-                pairing_data = await TadoBridge.perform_pairing_with_controller(bridge_ip, 80, pin, str(db_path))
-
-                # Save to DB
                 conn.execute(
                     "INSERT OR REPLACE INTO pairings (bridge_ip, pairing_data) VALUES (?, ?)",
                     (bridge_ip, json.dumps(pairing_data)),
@@ -467,14 +452,7 @@ class TadoBridge:
                 conn.commit()
                 logger.info("Pairing successful and saved to database!")
 
-                # Create pairing instance with the new data
-                # Create a controller instance for the pairing
-
-                char_cache = CharacteristicCacheSQLite(str(db_path))
-                controller = IpController(char_cache=char_cache, zeroconf_instance=zeroconf_instance)
-                pairing = IpPairing(controller, pairing_data)
-                await pairing._ensure_connected()
-                await pairing.list_accessories_and_characteristics()
+                pairing, _ = await TadoBridge._connect_pairing(pairing_data, str(db_path))
                 logger.info("Connected and fetched accessories!")
 
                 return pairing, bridge_ip
@@ -484,9 +462,9 @@ class TadoBridge:
 
                 # Provide enhanced error messages based on Home Assistant's approach
                 if "UnavailableError" in str(type(e)) or "Unavailable" in str(e):
-                    logger.error("" + "="*60)
+                    logger.error("" + "=" * 60)
                     logger.error("DEVICE REPORTS 'UNAVAILABLE' FOR PAIRING")
-                    logger.error("="*60)
+                    logger.error("=" * 60)
                     logger.error("Based on Home Assistant's approach, this typically means:")
                     logger.error("1. Device is already paired to another HomeKit controller")
                     logger.error("2. Device needs to be reset to clear existing pairings")
@@ -512,7 +490,7 @@ class TadoBridge:
                     logger.error("   - Check device status flags in mDNS browser")
                     logger.error("   - Look for 'sf=1' (unpaired) vs 'sf=0' (paired)")
                     logger.error("   - Verify device is actually advertising for pairing")
-                    logger.error("="*60 + "")
+                    logger.error("=" * 60 + "")
                 elif "Already" in str(e):
                     logger.error("Device appears to already be paired.")
                 elif "Authentication" in str(type(e)) or "Authentication" in str(e):
@@ -548,22 +526,14 @@ class TadoBridge:
             logger.info(f"Found existing accessory pairing for {accessory_ip}")
 
             try:
-                char_cache = CharacteristicCacheSQLite(db_str)
-                controller = IpController(char_cache=char_cache, zeroconf_instance=None)
-                pairing = IpPairing(controller, pairing_data)
-                await pairing._ensure_connected()
-                accessories = await pairing.list_accessories_and_characteristics()
-                logger.info(
-                    f"Accessory {accessory_ip}: connected, {len(accessories)} accessory/ies"
-                )
+                pairing, accessories = await TadoBridge._connect_pairing(pairing_data, db_str)
+                logger.info(f"Accessory {accessory_ip}: connected, {len(accessories)} accessory/ies")
                 conn.close()
                 return pairing, accessory_ip
             except Exception as e:
                 logger.error(f"Accessory {accessory_ip}: connection failed ({e})")
                 conn.close()
-                raise RuntimeError(
-                    f"Failed to connect to accessory {accessory_ip}: {e}"
-                )
+                raise RuntimeError(f"Failed to connect to accessory {accessory_ip}: {e}")
 
         # No existing pairing — need a PIN
         if not pin:
@@ -576,9 +546,7 @@ class TadoBridge:
 
         logger.info(f"Starting fresh pairing with accessory {accessory_ip}...")
         try:
-            pairing_data = await TadoBridge.perform_pairing_with_controller(
-                accessory_ip, 80, pin, db_str
-            )
+            pairing_data = await TadoBridge.perform_pairing_with_controller(accessory_ip, HOMEKIT_DEFAULT_PORT, pin, db_str)
             conn.execute(
                 "INSERT OR REPLACE INTO pairings (bridge_ip, pairing_data) VALUES (?, ?)",
                 (accessory_ip, json.dumps(pairing_data)),
@@ -586,11 +554,7 @@ class TadoBridge:
             conn.commit()
             logger.info(f"Accessory {accessory_ip}: pairing saved")
 
-            char_cache = CharacteristicCacheSQLite(db_str)
-            controller = IpController(char_cache=char_cache, zeroconf_instance=None)
-            pairing = IpPairing(controller, pairing_data)
-            await pairing._ensure_connected()
-            await pairing.list_accessories_and_characteristics()
+            pairing, _ = await TadoBridge._connect_pairing(pairing_data, db_str)
             logger.info(f"Accessory {accessory_ip}: connected after fresh pairing")
 
             conn.close()

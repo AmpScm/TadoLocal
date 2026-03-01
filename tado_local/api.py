@@ -35,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 class TadoLocalAPI:
     """Tado Local that leverages HomeKit for real-time data without cloud dependency."""
+
     accessories_cache: List[Any]
     accessories_dict: Dict[str, Any]
     accessories_id: Dict[int, str]
@@ -242,7 +243,7 @@ class TadoLocalAPI:
 
             accessories[key] = {
                 'id': device_id,  # Primary key for API
-                'aid': aid,       # HomeKit accessory ID
+                'aid': aid,  # HomeKit accessory ID
                 'serial_number': serial_number,
             } | a
 
@@ -283,8 +284,7 @@ class TadoLocalAPI:
         logger.info(f"Polling {len(chars_to_poll)} characteristics for initial state...")
 
         # Group by pairing so each is polled via its own connection
-        from collections import defaultdict as _dd
-        by_pairing: Dict[int, List] = _dd(list)
+        by_pairing: Dict[int, List] = defaultdict(list)
         for item in chars_to_poll:
             aid = item[0]
             by_pairing[id(self.aid_to_pairing.get(aid, self.pairing))].append(item)
@@ -295,21 +295,19 @@ class TadoLocalAPI:
         for pairing_id, items in by_pairing.items():
             pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
             for i in range(0, len(items), batch_size):
-                batch = items[i:i+batch_size]
+                batch = items[i : i + batch_size]
                 char_keys = [(aid, iid) for aid, iid, _, _ in batch]
 
                 try:
                     results = await pairing.get_characteristics(char_keys)
 
-                    for (aid, iid, device_id, char_type) in batch:
+                    for aid, iid, device_id, char_type in batch:
                         if (aid, iid) in results:
                             char_data = results[(aid, iid)]
                             value = char_data.get('value')
 
                             if value is not None:
-                                field_name, old_val, new_val = self.state_manager.update_device_characteristic(
-                                    device_id, char_type, value, timestamp
-                                )
+                                field_name, old_val, new_val = self.state_manager.update_device_characteristic(device_id, char_type, value, timestamp)
                                 if field_name:
                                     logger.debug(f"Initialized device {device_id} {field_name}: {value}")
 
@@ -380,6 +378,7 @@ class TadoLocalAPI:
                     logger.debug(f"Event ({source_label}) received: {update_data}")
                     for k, v in update_data.items():
                         asyncio.create_task(self.handle_change(k[0], k[1], v, source="EVENT"))
+
                 return event_callback
 
             all_pairings = [self.pairing] + self.extra_pairings
@@ -511,9 +510,7 @@ class TadoLocalAPI:
                             break
 
                     if char_type:
-                        field_name, old_val, new_val = self.state_manager.update_device_characteristic(
-                            device_id, char_type, value, timestamp
-                        )
+                        field_name, old_val, new_val = self.state_manager.update_device_characteristic(device_id, char_type, value, timestamp)
                         if field_name:
                             logger.debug(f"Updated device {device_id} {field_name}: {old_val} -> {new_val}")
 
@@ -541,9 +538,13 @@ class TadoLocalAPI:
 
             # Broadcast aggregated state change for relevant characteristics
             if char_name in [
-                        'TargetTemperature', 'CurrentTemperature', 'TargetHeatingCoolingState',
-                        'CurrentHeatingCoolingState', 'CurrentRelativeHumidity', 'ValvePosition'
-                    ]:
+                'TargetTemperature',
+                'CurrentTemperature',
+                'TargetHeatingCoolingState',
+                'CurrentHeatingCoolingState',
+                'CurrentRelativeHumidity',
+                'ValvePosition',
+            ]:
                 await self.broadcast_state_change(device_id, zone_name)
 
         except Exception as e:
@@ -593,21 +594,27 @@ class TadoLocalAPI:
 
                 if history['history_count'] < 2:
                     # Temperature drop is to slow to call it an open window
-                    logger.info(f"[Window] {zone_name} | Not enough readings (only {history['history_count']} " +
-                                f"entry in last {temp_change_time_threshold} minutes)")
+                    logger.info(
+                        f"[Window] {zone_name} | Not enough readings (only {history['history_count']} "
+                        + f"entry in last {temp_change_time_threshold} minutes)"
+                    )
                     return
 
-                mode = leader_state.get('cur_heating', 0)   # (0=Off, 1=Heating, 2=Cooling)
+                mode = leader_state.get('cur_heating', 0)  # (0=Off, 1=Heating, 2=Cooling)
                 if mode == 2:
                     # In cooling mode, calculate temp _rise_ (lastest - earlier) as temp_change
                     temp_change = history['latest_entry'][0] - history['earliest_entry'][0]
-                    logger.info(f"[Window] {zone_name} | cooling | Window status {current_window_state} " +
-                                f"for {time_diff:.0f} mins | Temp rise {temp_change:.1f}")
+                    logger.info(
+                        f"[Window] {zone_name} | cooling | Window status {current_window_state} "
+                        + f"for {time_diff:.0f} mins | Temp rise {temp_change:.1f}"
+                    )
                 else:
                     # In heating mode, calculate temp _drop_ (earlier - lastest) as temp_change
                     temp_change = history['earliest_entry'][0] - history['latest_entry'][0]
-                    logger.info(f"[Window] {zone_name} | heating | Window status {current_window_state} " +
-                                f"for {time_diff:.0f} mins | Temp drop {temp_change:.1f}")
+                    logger.info(
+                        f"[Window] {zone_name} | heating | Window status {current_window_state} "
+                        + f"for {time_diff:.0f} mins | Temp drop {temp_change:.1f}"
+                    )
 
                 # check if window is currently closed (0) or in rest (2) long enough to consider it closed again
                 if current_window_state == 0 or (current_window_state == 2 and time_diff > device_info.get('window_rest_time', 15)):
@@ -625,10 +632,11 @@ class TadoLocalAPI:
         except Exception as e:
             logger.error(f"Error in window open detection: {e}")
             import traceback
+
             print(traceback.format_exc())
 
     def _schedule_window_close_timer(self, device_id: int, window_close_delay: int, device_info: Dict[str, Any]):
-        """" Schedule a timer to set the window status back to closed after a delay."""
+        """ " Schedule a timer to set the window status back to closed after a delay."""
         if self.is_shutting_down:
             return
 
@@ -641,18 +649,18 @@ class TadoLocalAPI:
         task.add_done_callback(lambda t: self._window_close_timer_stop(device_id, t))
 
     def _cancel_window_close_timer(self, device_id: int):
-        """ Cancel any existing window close timer for the device."""
+        """Cancel any existing window close timer for the device."""
         task = self.window_close_timers.pop(device_id, None)
         if task and not task.done():
             task.cancel()
 
     def _window_close_timer_stop(self, device_id: int, task: asyncio.Task):
-        """ Callback to clean up after window close timer finishes or is cancelled."""
+        """Callback to clean up after window close timer finishes or is cancelled."""
         if self.window_close_timers.get(device_id) is task:
             del self.window_close_timers[device_id]
 
     async def _window_close_handler(self, device_id: int, device_info: Dict[str, Any], closing_delay: int):
-        """ Wait for the specified delay and then set the window status back to closed if it's still open."""
+        """Wait for the specified delay and then set the window status back to closed if it's still open."""
         interval = closing_delay * 60
 
         try:
@@ -712,7 +720,7 @@ class TadoLocalAPI:
         """Convert Celsius to Fahrenheit."""
         if celsius is None:
             return None
-        return round(celsius * 9/5 + 32, 1)
+        return round(celsius * 9 / 5 + 32, 1)
 
     def _build_device_state(self, device_id: int) -> dict:
         """Build a standardized device state dictionary."""
@@ -764,7 +772,7 @@ class TadoLocalAPI:
                 'serial': serial,
                 'zone_name': zone_name,
                 'state': device_state,
-                'timestamp': time.time()
+                'timestamp': time.time(),
             }
             await self.broadcast_event(device_event)
 
@@ -795,9 +803,10 @@ class TadoLocalAPI:
                     if is_circuit_driver:
                         # Circuit driver - check radiator valves in zone (from cache)
                         other_devices = [
-                                    dev_id for dev_id, dev_info in self.state_manager.device_info_cache.items()
-                                    if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')
-                                ]
+                            dev_id
+                            for dev_id, dev_info in self.state_manager.device_info_cache.items()
+                            if dev_info.get('zone_id') == zone_id and not dev_info.get('is_circuit_driver')
+                        ]
 
                         if other_devices:
                             for valve_id in other_devices:
@@ -821,13 +830,7 @@ class TadoLocalAPI:
                         self.last_zone_states[zone_id] = zone_state.copy()
 
                         # Broadcast zone state change
-                        zone_event = {
-                            'type': 'zone',
-                            'zone_id': zone_id,
-                            'zone_name': zone_name,
-                            'state': zone_state,
-                            'timestamp': time.time()
-                        }
+                        zone_event = {'type': 'zone', 'zone_id': zone_id, 'zone_name': zone_name, 'state': zone_state, 'timestamp': time.time()}
                         await self.broadcast_event(zone_event)
 
         except Exception as e:
@@ -919,8 +922,7 @@ class TadoLocalAPI:
 
     async def _poll_characteristics(self, char_list, source="POLLING"):
         """Poll a list of characteristics and process changes."""
-        from collections import defaultdict as _dd
-        by_pairing: Dict[int, List] = _dd(list)
+        by_pairing: Dict[int, List] = defaultdict(list)
         for item in char_list:
             by_pairing[id(self.aid_to_pairing.get(item[0], self.pairing))].append(item)
 
@@ -929,7 +931,7 @@ class TadoLocalAPI:
         for pairing_id, items in by_pairing.items():
             pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
             for i in range(0, len(items), batch_size):
-                batch = items[i:i+batch_size]
+                batch = items[i : i + batch_size]
 
                 try:
                     results = await pairing.get_characteristics(batch)
@@ -953,10 +955,7 @@ class TadoLocalAPI:
             value = event_data.get('value')
 
             if aid and iid and value is not None:
-                self.device_states[str(aid)][str(iid)] = {
-                    'value': value,
-                    'timestamp': time.time()
-                }
+                self.device_states[str(aid)][str(iid)] = {'value': value, 'timestamp': time.time()}
 
                 # Notify event listeners (for SSE)
                 for queue in self.event_listeners:
