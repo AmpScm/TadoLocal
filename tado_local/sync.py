@@ -83,11 +83,14 @@ class TadoCloudSync:
             timezone = home_data.get('dateTimeZone')
             temp_unit = home_data.get('temperatureUnit')
 
-            conn.execute("""
+            conn.execute(
+                """
                 INSERT OR REPLACE INTO tado_homes
                 (tado_home_id, name, timezone, temperature_unit, updated_at)
                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
-            """, (home_id, name, timezone, temp_unit))
+            """,
+                (home_id, name, timezone, temp_unit),
+            )
 
             conn.commit()
             conn.close()
@@ -133,30 +136,40 @@ class TadoCloudSync:
                     continue
 
                 # Check if zone already exists
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT zone_id FROM zones
                     WHERE tado_home_id = ? AND tado_zone_id = ?
-                """, (home_id, tado_zone_id))
+                """,
+                    (home_id, tado_zone_id),
+                )
                 existing = cursor.fetchone()
 
                 if existing:
                     # Update existing zone
                     zone_id = existing[0]
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         UPDATE zones
                         SET name = ?, zone_type = ?, order_id = ?, updated_at = CURRENT_TIMESTAMP
                         WHERE zone_id = ?
-                    """, (zone_name, zone_type, order_index, zone_id))
+                    """,
+                        (zone_name, zone_type, order_index, zone_id),
+                    )
                     logger.debug(f"Updated zone {zone_id}: {zone_name} (Tado ID: {tado_zone_id}, order: {order_index})")
                 else:
                     # Insert new zone with stable uuid
                     import uuid as _uuid
+
                     new_uuid = str(_uuid.uuid4())
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         INSERT INTO zones
                         (tado_zone_id, tado_home_id, name, zone_type, order_id, uuid, created_at, updated_at)
                         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                    """, (tado_zone_id, home_id, zone_name, zone_type, order_index, new_uuid))
+                    """,
+                        (tado_zone_id, home_id, zone_name, zone_type, order_index, new_uuid),
+                    )
                     zone_id = cursor.lastrowid
                     logger.info(f"Created zone {zone_id}: {zone_name} (Tado ID: {tado_zone_id}, order: {order_index})")
 
@@ -177,39 +190,67 @@ class TadoCloudSync:
                     duties_str = ','.join(duties) if duties else None
 
                     # Check if device exists
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         SELECT device_id FROM devices WHERE serial_number = ?
-                    """, (serial,))
+                    """,
+                        (serial,),
+                    )
                     existing_device = cursor.fetchone()
 
                     if existing_device:
                         # Update existing device - don't overwrite name (comes from HomeKit)
                         device_id = existing_device[0]
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             UPDATE devices
                             SET tado_zone_id = ?, zone_id = ?, device_type = ?,
                                 battery_state = ?, firmware_version = ?,
                                 is_zone_leader = ?, is_circuit_driver = ?, is_zone_driver = ?,
                                 duties = ?, last_seen = CURRENT_TIMESTAMP
                             WHERE device_id = ?
-                        """, (tado_zone_id, zone_id, device_type, battery_state,
-                              firmware, is_leader, is_circuit_driver, is_zone_driver,
-                              duties_str, device_id))
+                        """,
+                            (
+                                tado_zone_id,
+                                zone_id,
+                                device_type,
+                                battery_state,
+                                firmware,
+                                is_leader,
+                                is_circuit_driver,
+                                is_zone_driver,
+                                duties_str,
+                                device_id,
+                            ),
+                        )
                         logger.debug(f"Updated device {serial} in zone {zone_name}")
                     else:
                         # Insert new device - use device type + serial as placeholder name
                         # (will be updated with proper name from HomeKit later)
                         device_name = f"{device_type}_{serial[-6:]}"
-                        cursor.execute("""
+                        cursor.execute(
+                            """
                             INSERT INTO devices
                             (serial_number, tado_zone_id, zone_id, device_type, name,
                              battery_state, firmware_version, is_zone_leader,
                              is_circuit_driver, is_zone_driver, duties,
                              first_seen, last_seen)
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                        """, (serial, tado_zone_id, zone_id, device_type, device_name,
-                              battery_state, firmware, is_leader, is_circuit_driver,
-                              is_zone_driver, duties_str))
+                        """,
+                            (
+                                serial,
+                                tado_zone_id,
+                                zone_id,
+                                device_type,
+                                device_name,
+                                battery_state,
+                                firmware,
+                                is_leader,
+                                is_circuit_driver,
+                                is_zone_driver,
+                                duties_str,
+                            ),
+                        )
                         device_id = cursor.lastrowid
                         logger.info(f"Created device {serial} ({device_type}) in zone {zone_name}")
 
@@ -219,9 +260,12 @@ class TadoCloudSync:
                     # Update zone leader if this device is the leader
                     if is_leader:
                         try:
-                            cursor.execute("""
+                            cursor.execute(
+                                """
                                 UPDATE zones SET leader_device_id = ? WHERE zone_id = ?
-                            """, (device_id, zone_id))
+                            """,
+                                (device_id, zone_id),
+                            )
                             logger.debug(f"Set leader device {device_id} for zone {zone_name}")
                         except Exception as e:
                             logger.debug(f"Failed to set leader device for zone {zone_name}: {e}")
@@ -249,10 +293,12 @@ class TadoCloudSync:
 
     def sync_zone_states_data(self, zone_states_data: List[Dict[str, Any]], home_id: int, tado_api: TadoLocalAPI) -> bool:
         """
-        Sync zone states from Tado Cloud API to update humidity.
+        Sync zone states from Tado Cloud API to update temperature and humidity.
 
-        The zoneStates_data endpoint provides additional device information including
-        link status, schedule information, geolocation that may not be available via HomeKit.
+        The zoneStates endpoint provides authoritative sensor data that supplements
+        HomeKit readings.  Standalone accessories (e.g. Smart AC Control V3+) may
+        not fire HomeKit temperature events reliably, so cloud values act as a
+        correction layer.
 
         Args:
             zone_states_data: Zone state response from Tado Cloud API
@@ -267,37 +313,46 @@ class TadoCloudSync:
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
 
-            humidity_updates = 0
+            sensor_updates = 0
 
             zones = zone_states_data.get('zoneStates', {})
             for zone_id, zone_state in zones.items():
                 settings = zone_state.get('setting', {})
 
                 if not settings or settings.get('type') == 'HOT_WATER':
-                    continue  # Do not process HOT_WATER zones for now
+                    continue
 
-                sensoDataPoints = zone_state.get('sensorDataPoints', {})
-                humidity = str(sensoDataPoints.get('humidity', {}).get('percentage'))
+                sensor_data = zone_state.get('sensorDataPoints', {})
+                humidity = sensor_data.get('humidity', {}).get('percentage')
+                temperature = sensor_data.get('insideTemperature', {}).get('celsius')
 
-                if humidity != "None":
-                    logger.debug(f"Get all aids for zone: {zone_id}")
-                    # Get all devices of this zone to generate update humidity
-                    cursor.execute(f"SELECT aid FROM devices WHERE tado_zone_id = '{zone_id}'")
+                if humidity is None and temperature is None:
+                    continue
 
-                    for device in cursor.fetchall():
-                        # Get iid for this specific device(may be multiple devices in one zone with different iids)
-                        iid = tado_api.get_iid_from_characteristics(device[0], "CurrentRelativeHumidity") if device else None
+                logger.debug(f"Cloud sensor data for zone {zone_id}: temp={temperature}, hum={humidity}")
+                cursor.execute("SELECT aid FROM devices WHERE tado_zone_id = ?", (str(zone_id),))
 
-                        if device and iid:
-                            # Create an update event for humidity
-                            asyncio.create_task(tado_api.handle_change(device[0], iid, {'value': humidity}, source="POLLING"))
-                            logger.debug(f"Humidity change, generate event: ({device[0]}, {iid}) >> value = {humidity}")
-                            humidity_updates += 1
+                for device in cursor.fetchall():
+                    aid = device[0]
+                    if not aid:
+                        continue
+
+                    if humidity is not None:
+                        iid = tado_api.get_iid_from_characteristics(aid, "CurrentRelativeHumidity")
+                        if iid:
+                            asyncio.create_task(tado_api.handle_change(aid, iid, {'value': humidity}, source="POLLING"))
+                            sensor_updates += 1
+
+                    if temperature is not None:
+                        iid = tado_api.get_iid_from_characteristics(aid, "CurrentTemperature")
+                        if iid:
+                            asyncio.create_task(tado_api.handle_change(aid, iid, {'value': temperature}, source="POLLING"))
+                            sensor_updates += 1
 
             conn.commit()
             conn.close()
 
-            logger.info(f"Updated {humidity_updates} devices from zone states data")
+            logger.info(f"Cloud zone states: {sensor_updates} sensor updates applied")
             return True
 
         except Exception as e:
@@ -324,8 +379,10 @@ class TadoCloudSync:
 
             updated_count = 0
 
-            entries = device_list_data.get('entries', [])
+            entries = device_list_data.get('entries', []) if isinstance(device_list_data, dict) else device_list_data or []
             for entry in entries:
+                if not entry or not isinstance(entry, dict):
+                    continue
                 device = entry.get('device')
                 if not device:
                     continue
@@ -338,24 +395,30 @@ class TadoCloudSync:
                 firmware = device.get('currentFwVersion')
                 raw_device_type = device.get('deviceType')
                 device_type = normalize_device_type(raw_device_type) if raw_device_type else None
-                zone_info = entry.get('zone', {})
+                zone_info = entry.get('zone') or {}
                 tado_zone_id = zone_info.get('discriminator')
 
                 # Check if device exists
-                cursor.execute("""
+                cursor.execute(
+                    """
                     SELECT device_id FROM devices WHERE serial_number = ?
-                """, (serial,))
+                """,
+                    (serial,),
+                )
                 existing = cursor.fetchone()
 
                 if existing:
                     # Update existing device
-                    cursor.execute("""
+                    cursor.execute(
+                        """
                         UPDATE devices
                         SET battery_state = ?, firmware_version = ?,
                             device_type = ?, tado_zone_id = ?, model = ?,
                             last_seen = CURRENT_TIMESTAMP
                         WHERE serial_number = ?
-                    """, (battery_state, firmware, device_type, tado_zone_id, raw_device_type, serial))
+                    """,
+                        (battery_state, firmware, device_type, tado_zone_id, raw_device_type, serial),
+                    )
                     updated_count += 1
                 else:
                     # Device not yet in database - will be added during zone sync
@@ -371,11 +434,7 @@ class TadoCloudSync:
             logger.error(f"Failed to sync device list: {e}", exc_info=True)
             return False
 
-    async def sync_all(self, cloud_api,
-                       home_data=None,
-                       zones_data=None,
-                       zone_states_data=None,
-                       devices_data=None) -> bool:
+    async def sync_all(self, cloud_api, home_data=None, zones_data=None, zone_states_data=None, devices_data=None) -> bool:
         """
         Sync all data from Tado Cloud API to database.
 

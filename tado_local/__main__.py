@@ -128,8 +128,21 @@ async def run_server(args):
             args.bridge_ip, args.pin, db_path, args.clear_pairings
         )
 
-        # Initialize the API with the pairing
-        await tado_api.initialize(bridge_pairing)
+        # Pair / load standalone accessories (e.g. Smart AC Control V3+)
+        accessory_pairings = []
+        for idx, acc_ip in enumerate(args.accessory_ip):
+            acc_pin = args.accessory_pin[idx] if idx < len(args.accessory_pin) else None
+            try:
+                pairing, _ = await TadoBridge.pair_or_load_accessory(
+                    acc_ip, acc_pin, db_path
+                )
+                accessory_pairings.append(pairing)
+                logger.info(f"Standalone accessory {acc_ip}: ready")
+            except Exception as e:
+                logger.error(f"Standalone accessory {acc_ip}: failed ({e})")
+
+        # Initialize the API with the bridge pairing + any standalone accessories
+        await tado_api.initialize(bridge_pairing, extra_pairings=accessory_pairings or None)
 
         # Register mDNS service asynchronously (Avahi via DBus preferred, fall back to zeroconf)
         if not args.no_mdns:
@@ -385,6 +398,12 @@ Examples:
   # Debug mode with verbose logging
   tado-local --bridge-ip 192.168.1.100 --verbose
 
+  # Pair a standalone Smart AC Control alongside the bridge
+  tado-local --bridge-ip 192.168.1.100 --accessory-ip 192.168.1.101 --accessory-pin 987-65-432
+
+  # Reconnect to a previously paired standalone accessory (no PIN needed)
+  tado-local --bridge-ip 192.168.1.100 --accessory-ip 192.168.1.101
+
 API Endpoints:
   GET  /               - API information
   GET  /status         - System status
@@ -436,6 +455,14 @@ API Endpoints:
     parser.add_argument(
             "--pid-file",
             help="Write process ID to specified file (useful for daemon mode)"
+        )
+    parser.add_argument(
+            "--accessory-ip", action="append", default=[],
+            help="IP of a standalone HomeKit accessory such as Tado Smart AC Control V3+ (repeatable)"
+        )
+    parser.add_argument(
+            "--accessory-pin", action="append", default=[],
+            help="HomeKit PIN for a standalone accessory (repeatable, order must match --accessory-ip)"
         )
     # Parse CLI arguments
     args = parser.parse_args()
