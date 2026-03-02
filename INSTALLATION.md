@@ -59,6 +59,58 @@ pip install .
 pip install git+https://github.com/ampscm/TadoLocal.git
 ```
 
+### Method 4: Container (Docker/Podman)
+
+Run TadoLocal in a container — no Python install required. Works on any platform
+with Docker or Podman, including NAS devices and Raspberry Pi (ARM).
+
+#### Build
+
+```bash
+# From the project directory
+docker build -t tado-local .
+
+# Or with Podman
+podman build -t tado-local .
+```
+
+#### First-time pairing
+
+The bridge PIN is only needed for the initial pairing. The pairing database is
+persisted in the `/data` volume so it survives container restarts.
+
+```bash
+docker run -d --name tado-local \
+  -p 4407:4407 \
+  -v tado-data:/data \
+  -e TADO_BRIDGE_IP=192.168.1.100 \
+  -e TADO_BRIDGE_PIN=123-45-678 \
+  tado-local
+```
+
+#### Subsequent runs
+
+Once paired, `TADO_BRIDGE_PIN` can be omitted:
+
+```bash
+docker run -d --name tado-local \
+  -p 4407:4407 \
+  -v tado-data:/data \
+  -e TADO_BRIDGE_IP=192.168.1.100 \
+  tado-local
+```
+
+#### Environment variables
+
+| Variable | Required | Description |
+|---|---|---|
+| `TADO_BRIDGE_IP` | Yes (first run) | IP address of your Tado bridge |
+| `TADO_BRIDGE_PIN` | First pairing only | HomeKit PIN printed on the bridge |
+| `TADO_PORT` | No (default `4407`) | Port the API listens on inside the container |
+
+> **Tip:** Replace `docker` with `podman` in all commands above if using Podman.
+> The image is multi-arch and works on both AMD64 and ARM64.
+
 ## Usage
 
 After installation, you can run the proxy in multiple ways:
@@ -132,7 +184,6 @@ pip uninstall tado-local
 
 **Future Work**: 📋
 - Comprehensive test suite
-- Add Docker support
 - Publish to PyPI
 - CI/CD pipeline
 
