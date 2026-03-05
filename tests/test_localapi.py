@@ -9,6 +9,7 @@ import asyncio
 from tado_local.api import TadoLocalAPI
 from tado_local.state import DeviceStateManager
 
+
 @pytest.fixture
 def api_instance(tmp_path):
     """Fixture to create a TadoLocalAPI instance."""
@@ -27,6 +28,7 @@ def mock_pairing():
     pairing.put_characteristics = AsyncMock(return_value={})
     pairing.dispatcher_connect = Mock()
     return pairing
+
 
 class TestTadoLocalAPI:
     @pytest.mark.asyncio
@@ -47,13 +49,14 @@ class TestTadoLocalAPI:
         assert api_instance.is_shutting_down is False
         assert api_instance.state_manager is not None
 
-
     @pytest.mark.asyncio
     async def test_initialize_with_pairing(self, api_instance, mock_pairing):
         """Test API initialization with pairing."""
-        with patch.object(api_instance, 'refresh_accessories', new_callable=AsyncMock) as mock_refresh, \
-            patch.object(api_instance, 'initialize_device_states', new_callable=AsyncMock) as mock_init_states, \
-            patch.object(api_instance, 'setup_event_listeners', new_callable=AsyncMock) as mock_setup:
+        with (
+            patch.object(api_instance, 'refresh_accessories', new_callable=AsyncMock) as mock_refresh,
+            patch.object(api_instance, 'initialize_device_states', new_callable=AsyncMock) as mock_init_states,
+            patch.object(api_instance, 'setup_event_listeners', new_callable=AsyncMock) as mock_setup,
+        ):
 
             await api_instance.initialize(mock_pairing)
 
@@ -68,6 +71,7 @@ class TestTadoLocalAPI:
         """Test cleanup properly shuts down resources."""
         api_instance.pairing = mock_pairing
         api_instance.subscribed_characteristics = [(1, 1), (1, 2)]
+        api_instance.pairing_subscriptions = {id(mock_pairing): [(1, 1), (1, 2)]}
 
         # Create actual asyncio tasks that can be cancelled and gathered
         async def dummy_task():
@@ -111,7 +115,6 @@ class TestTadoLocalAPI:
         assert queue1 in api_instance.event_listeners
         assert queue2 in api_instance.zone_event_listeners
 
-
     @pytest.mark.asyncio
     async def test_initialization_flag(self, api_instance):
         """Test initialization flag prevents logging during init."""
@@ -122,7 +125,6 @@ class TestTadoLocalAPI:
 
         api_instance.is_initializing = False
         assert api_instance.is_initializing is False
-
 
     @pytest.mark.asyncio
     async def test_shutdown_flag(self, api_instance):
@@ -137,17 +139,7 @@ class TestTadoLocalAPIRefreshAccessories:
     @pytest.mark.asyncio
     async def test_process_raw_accessories(self, api_instance):
         """Test raw accessories processing."""
-        raw_accessories = [
-            {
-                'aid': 1,
-                'services': [
-                    {
-                        'type': '0000003E-0000-1000-8000-0026BB765291',
-                        'characteristics': []
-                    }
-                ]
-            }
-        ]
+        raw_accessories = [{'aid': 1, 'services': [{'type': '0000003E-0000-1000-8000-0026BB765291', 'characteristics': []}]}]
 
         with patch.object(api_instance.state_manager, 'get_or_create_device', return_value=1):
             result = api_instance._process_raw_accessories(raw_accessories)
@@ -163,10 +155,10 @@ class TestTadoLocalAPIRefreshAccessories:
                         'type': '0000003E-0000-1000-8000-0026BB765291',
                         'characteristics': [
                             {'type': '00000030-0000-1000-8000-0026BB765291', 'value': 'SN12345'},
-                            {'type': '00000011-0000-1000-8000-0026BB765291', 'value': '21.3'}
-                        ]
+                            {'type': '00000011-0000-1000-8000-0026BB765291', 'value': '21.3'},
+                        ],
                     }
-                ]
+                ],
             }
         ]
 
@@ -192,11 +184,9 @@ class TestTadoLocalAPIRefreshAccessories:
                 'services': [
                     {
                         'type': '0000003E-0000-1000-8000-0026BB765291',
-                        'characteristics': [
-                            {'type': '00000030-0000-1000-8000-0026BB765291', 'value': 'SN12345'}
-                        ]
+                        'characteristics': [{'type': '00000030-0000-1000-8000-0026BB765291', 'value': 'SN12345'}],
                     }
-                ]
+                ],
             }
         ]
 
@@ -223,70 +213,33 @@ class TestTadoLocalAPIDeviceStates:
         # No calls should be made
         assert api_instance.pairing is None
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_no_char_to_poll(self, api_instance, mock_pairing):
         """Test initialize_device_states when no readable characteristics exist."""
         api_instance.pairing = mock_pairing
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature')]}
 
         # Setup accessories with non-readable characteristic
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [
-                    {
-                        'characteristics': [
-                            {
-                                'iid': 10,
-                                'perms': ['pw']  # Write-only, not readable
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pw']}]}]}]  # Write-only, not readable
 
         await api_instance.initialize_device_states()
 
         # Should not call get_characteristics
         mock_pairing.get_characteristics.assert_not_called()
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_single_readable_char(self, api_instance, mock_pairing):
         """Test initialize_device_states with a single readable characteristic."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature')]}
 
         # Setup accessories with readable characteristic
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [
-                    {
-                        'characteristics': [
-                            {
-                                'iid': 10,
-                                'perms': ['pr', 'ev']  # Readable
-                            }
-                        ]
-                    }
-                ]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr', 'ev']}]}]}]  # Readable
 
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': 21.5}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': 21.5}}
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 21.5)) as mock_update:
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 21.5)) as mock_update:
             await api_instance.initialize_device_states()
 
             mock_pairing.get_characteristics.assert_called_once_with([(1, 10)])
@@ -296,55 +249,26 @@ class TestTadoLocalAPIDeviceStates:
             assert call_args[1] == 'temperature'  # char_type
             assert call_args[2] == 21.5  # value
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_multiple_char(self, api_instance, mock_pairing):
         """Test initialize_device_states with multiple readable characteristics."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature'), (1, 11, 'humidity')],
-            2: [(2, 20, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature'), (1, 11, 'humidity')], 2: [(2, 20, 'temperature')]}
 
         # Setup accessories
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [
-                    {
-                        'characteristics': [
-                            {'iid': 10, 'perms': ['pr']},
-                            {'iid': 11, 'perms': ['pr', 'ev']}
-                        ]
-                    }
-                ]
-            },
-            {
-                'aid': 2,
-                'services': [
-                    {
-                        'characteristics': [
-                            {'iid': 20, 'perms': ['pr']}
-                        ]
-                    }
-                ]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr']}, {'iid': 11, 'perms': ['pr', 'ev']}]}]},
+            {'aid': 2, 'services': [{'characteristics': [{'iid': 20, 'perms': ['pr']}]}]},
         ]
 
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': 21.5},
-            (1, 11): {'value': 55},
-            (2, 20): {'value': 22.0}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': 21.5}, (1, 11): {'value': 55}, (2, 20): {'value': 22.0}}
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('field', None, 'value')) as mock_update:
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('field', None, 'value')) as mock_update:
             await api_instance.initialize_device_states()
 
             mock_pairing.get_characteristics.assert_called_once()
             assert mock_update.call_count == 3
-
 
     @pytest.mark.asyncio
     async def test_initialize_device_states_batch_processing(self, api_instance, mock_pairing):
@@ -360,27 +284,20 @@ class TestTadoLocalAPIDeviceStates:
             iid = 10
             device_to_chars[aid] = [(aid, iid, 'temperature')]
 
-            accessories.append({
-                'aid': aid,
-                'services': [{
-                    'characteristics': [{'iid': iid, 'perms': ['pr']}]
-                }]
-            })
+            accessories.append({'aid': aid, 'services': [{'characteristics': [{'iid': iid, 'perms': ['pr']}]}]})
 
         api_instance.device_to_characteristics = device_to_chars
         api_instance.accessories_cache = accessories
 
         # Mock responses for all characteristics
-        mock_results = {(i+1, 10): {'value': 20.0 + i} for i in range(25)}
+        mock_results = {(i + 1, 10): {'value': 20.0 + i} for i in range(25)}
         mock_pairing.get_characteristics.return_value = mock_results
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 20.0)):
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 20.0)):
             await api_instance.initialize_device_states()
 
             # Should be called 3 times (batch_size=10: 10, 10, 5)
             assert mock_pairing.get_characteristics.call_count == 3
-
 
     @pytest.mark.asyncio
     async def test_initialize_device_states_handles_batch_errors(self, api_instance, mock_pairing):
@@ -396,52 +313,31 @@ class TestTadoLocalAPIDeviceStates:
             iid = 10
             device_to_chars[aid] = [(aid, iid, 'temperature')]
 
-            accessories.append({
-                'aid': aid,
-                'services': [{
-                    'characteristics': [{'iid': iid, 'perms': ['pr']}]
-                }]
-            })
+            accessories.append({'aid': aid, 'services': [{'characteristics': [{'iid': iid, 'perms': ['pr']}]}]})
 
         api_instance.device_to_characteristics = device_to_chars
         api_instance.accessories_cache = accessories
 
         # First batch fails, second succeeds
-        mock_pairing.get_characteristics.side_effect = [
-            Exception("Connection error"),
-            {(i, 10): {'value': 20.0} for i in range(11, 16)}
-        ]
+        mock_pairing.get_characteristics.side_effect = [Exception("Connection error"), {(i, 10): {'value': 20.0} for i in range(11, 16)}]
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 20.0)):
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 20.0)):
             await api_instance.initialize_device_states()
 
             # Should attempt both batches despite first one failing
             assert mock_pairing.get_characteristics.call_count == 2
-
 
     @pytest.mark.asyncio
     async def test_initialize_device_states_skips_none_values(self, api_instance, mock_pairing):
         """Test that None values are skipped during initialization."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature')]}
 
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [{'iid': 10, 'perms': ['pr']}]
-                }]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr']}]}]}]
 
         # Return None value
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': None}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': None}}
 
         with patch.object(api_instance.state_manager, 'update_device_characteristic') as mock_update:
             await api_instance.initialize_device_states()
@@ -449,27 +345,14 @@ class TestTadoLocalAPIDeviceStates:
             # Should not call update_device_characteristic for None values
             mock_update.assert_not_called()
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_missing_characteristic_data(self, api_instance, mock_pairing):
         """Test handling when characteristic is not in results."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature'), (1, 11, 'humidity')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature'), (1, 11, 'humidity')]}
 
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'perms': ['pr']},
-                        {'iid': 11, 'perms': ['pr']}
-                    ]
-                }]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr']}, {'iid': 11, 'perms': ['pr']}]}]}]
 
         # Only return one characteristic
         mock_pairing.get_characteristics.return_value = {
@@ -477,43 +360,37 @@ class TestTadoLocalAPIDeviceStates:
             # (1, 11) missing
         }
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 21.5)) as mock_update:
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 21.5)) as mock_update:
             await api_instance.initialize_device_states()
 
             # Should only update the one present
             assert mock_update.call_count == 1
-
 
     @pytest.mark.asyncio
     async def test_initialize_device_states_mixed_permissions(self, api_instance, mock_pairing):
         """Test that only readable characteristics are polled."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature'), (1, 11, 'target_temp'), (1, 12, 'mode')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature'), (1, 11, 'target_temp'), (1, 12, 'mode')]}
 
         api_instance.accessories_cache = [
             {
                 'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'perms': ['pr']},  # Readable
-                        {'iid': 11, 'perms': ['pw']},  # Write-only
-                        {'iid': 12, 'perms': ['pr', 'pw']}  # Read-write
-                    ]
-                }]
+                'services': [
+                    {
+                        'characteristics': [
+                            {'iid': 10, 'perms': ['pr']},  # Readable
+                            {'iid': 11, 'perms': ['pw']},  # Write-only
+                            {'iid': 12, 'perms': ['pr', 'pw']},  # Read-write
+                        ]
+                    }
+                ],
             }
         ]
 
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': 21.5},
-            (1, 12): {'value': 1}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': 21.5}, (1, 12): {'value': 1}}
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('field', None, 'value')):
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('field', None, 'value')):
             await api_instance.initialize_device_states()
 
             # Should only poll characteristics with 'pr' permission
@@ -523,32 +400,21 @@ class TestTadoLocalAPIDeviceStates:
             assert (1, 12) in call_args
             assert (1, 11) not in call_args
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_uses_timestamp(self, api_instance, mock_pairing):
         """Test that timestamp is passed to state manager."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature')]}
 
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [{'iid': 10, 'perms': ['pr']}]
-                }]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr']}]}]}]
 
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': 21.5}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': 21.5}}
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 21.5)) as mock_update, \
-             patch('time.time', return_value=1234567890.0):
+        with (
+            patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 21.5)) as mock_update,
+            patch('time.time', return_value=1234567890.0),
+        ):
 
             await api_instance.initialize_device_states()
 
@@ -556,31 +422,18 @@ class TestTadoLocalAPIDeviceStates:
             call_args = mock_update.call_args[0]
             assert call_args[3] == 1234567890.0  # timestamp argument
 
-
     @pytest.mark.asyncio
     async def test_initialize_device_states_logs_initialization(self, api_instance, mock_pairing):
         """Test that initialization is properly logged."""
         api_instance.pairing = mock_pairing
 
-        api_instance.device_to_characteristics = {
-            1: [(1, 10, 'temperature')]
-        }
+        api_instance.device_to_characteristics = {1: [(1, 10, 'temperature')]}
 
-        api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [{'iid': 10, 'perms': ['pr']}]
-                }]
-            }
-        ]
+        api_instance.accessories_cache = [{'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'perms': ['pr']}]}]}]
 
-        mock_pairing.get_characteristics.return_value = {
-            (1, 10): {'value': 21.5}
-        }
+        mock_pairing.get_characteristics.return_value = {(1, 10): {'value': 21.5}}
 
-        with patch.object(api_instance.state_manager, 'update_device_characteristic',
-                         return_value=('temperature', None, 21.5)):
+        with patch.object(api_instance.state_manager, 'update_device_characteristic', return_value=('temperature', None, 21.5)):
             await api_instance.initialize_device_states()
 
             # Method should complete without errors
@@ -598,7 +451,6 @@ class TestTadoLocalAPISetupEventListeners:
         # Should return without setting up change_tracker
         assert not hasattr(api_instance, 'change_tracker')
 
-
     @pytest.mark.asyncio
     async def test_setup_event_listeners_initializes_change_tracker(self, api_instance, mock_pairing):
         """Test that change_tracker is properly initialized."""
@@ -615,28 +467,22 @@ class TestTadoLocalAPISetupEventListeners:
             assert isinstance(api_instance.change_tracker['last_values'], dict)
             assert isinstance(api_instance.change_tracker['event_characteristics'], set)
 
-
     @pytest.mark.asyncio
     async def test_setup_event_listeners_populates_last_values(self, api_instance, mock_pairing):
         """Test that last_values is populated from current device states."""
         api_instance.pairing = mock_pairing
         api_instance.device_to_characteristics = {
-            1: [
-                (1, 10, DeviceStateManager.CHAR_CURRENT_TEMPERATURE),
-                (1, 11, DeviceStateManager.CHAR_TARGET_TEMPERATURE)
-            ]
+            1: [(1, 10, DeviceStateManager.CHAR_CURRENT_TEMPERATURE), (1, 11, DeviceStateManager.CHAR_TARGET_TEMPERATURE)]
         }
         api_instance.accessories_cache = []
 
         # Mock current state
-        mock_state = {
-            'current_temperature': 21.5,
-            'target_temperature': 22.0,
-            'humidity': 55
-        }
+        mock_state = {'current_temperature': 21.5, 'target_temperature': 22.0, 'humidity': 55}
 
-        with patch.object(api_instance.state_manager, 'get_current_state', return_value=mock_state), \
-                patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True):
+        with (
+            patch.object(api_instance.state_manager, 'get_current_state', return_value=mock_state),
+            patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True),
+        ):
 
             await api_instance.setup_event_listeners()
 
@@ -646,7 +492,6 @@ class TestTadoLocalAPISetupEventListeners:
             assert (1, 11) in api_instance.change_tracker['last_values']
             assert api_instance.change_tracker['last_values'][(1, 11)] == 22.0
 
-
     @pytest.mark.asyncio
     async def test_setup_event_listeners_calls_persistent_events(self, api_instance, mock_pairing):
         """Test that setup_persistent_events is called."""
@@ -654,12 +499,10 @@ class TestTadoLocalAPISetupEventListeners:
         api_instance.device_to_characteristics = {}
         api_instance.accessories_cache = []
 
-        with patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True) \
-                as mock_setup:
+        with patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True) as mock_setup:
             await api_instance.setup_event_listeners()
 
             mock_setup.assert_called_once()
-
 
     @pytest.mark.asyncio
     async def test_setup_event_listeners_fallback_to_polling(self, api_instance, mock_pairing):
@@ -668,27 +511,30 @@ class TestTadoLocalAPISetupEventListeners:
         api_instance.device_to_characteristics = {}
         api_instance.accessories_cache = []
 
-        with patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=False), \
-                patch.object(api_instance, 'setup_polling_system', new_callable=AsyncMock) as mock_polling:
+        with (
+            patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=False),
+            patch.object(api_instance, 'setup_polling_system', new_callable=AsyncMock) as mock_polling,
+        ):
 
             await api_instance.setup_event_listeners()
 
             mock_polling.assert_called_once()
 
-
     @pytest.mark.asyncio
-    async def test_setup_event_listeners_skips_polling_when_events_active(self, api_instance, mock_pairing):
-        """Test that polling is skipped when events are active."""
+    async def test_setup_event_listeners_always_enables_polling(self, api_instance, mock_pairing):
+        """Test that polling is always enabled as safety net for standalone accessories."""
         api_instance.pairing = mock_pairing
         api_instance.device_to_characteristics = {}
         api_instance.accessories_cache = []
 
-        with patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True), \
-                patch.object(api_instance, 'setup_polling_system', new_callable=AsyncMock) as mock_polling:
+        with (
+            patch.object(api_instance, 'setup_persistent_events', new_callable=AsyncMock, return_value=True),
+            patch.object(api_instance, 'setup_polling_system', new_callable=AsyncMock) as mock_polling,
+        ):
 
             await api_instance.setup_event_listeners()
 
-            mock_polling.assert_not_called()
+            mock_polling.assert_called_once()
 
 
 class TestTadoLocalAPISetupPersistentEvents:
@@ -697,53 +543,34 @@ class TestTadoLocalAPISetupPersistentEvents:
         """Test setup_persistent_events when no event characteristics exist."""
         api_instance.pairing = mock_pairing
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['pr']}  # No 'ev'
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['pr']}]}]}  # No 'ev'
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         result = await api_instance.setup_persistent_events()
 
         assert result is False
         mock_pairing.subscribe.assert_not_called()
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_success(self, api_instance, mock_pairing):
         """Test successful setup of persistent events."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
             {
                 'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {
-                            'iid': 10,
-                            'type': '00000011-0000-1000-8000-0026BB765291',
-                            'perms': ['pr', 'ev']  # Event notification supported
-                        },
-                        {
-                            'iid': 11,
-                            'type': '00000035-0000-1000-8000-0026BB765291',
-                            'perms': ['pr', 'pw', 'ev']
-                        }
-                    ]
-                }]
+                'services': [
+                    {
+                        'characteristics': [
+                            {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['pr', 'ev']},  # Event notification supported
+                            {'iid': 11, 'type': '00000035-0000-1000-8000-0026BB765291', 'perms': ['pr', 'pw', 'ev']},
+                        ]
+                    }
+                ],
             }
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         result = await api_instance.setup_persistent_events()
 
@@ -756,77 +583,56 @@ class TestTadoLocalAPISetupPersistentEvents:
         assert (1, 11) in call_args
         assert len(api_instance.subscribed_characteristics) == 2
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_registers_dispatcher(self, api_instance, mock_pairing):
         """Test that event callback is registered with dispatcher."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]}
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
         # Check that dispatcher_connect was called
         mock_pairing.dispatcher_connect.assert_called_once()
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_populates_char_maps(self, api_instance, mock_pairing):
         """Test that characteristic maps are populated."""
         mock_pairing.dispatcher_connect = Mock()  # ensure sync
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]}
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
         # Check characteristic_map was populated
         assert (1, 10) in api_instance.characteristic_map
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_tracks_event_char(self, api_instance, mock_pairing):
         """Test that event characteristics are tracked."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
             {
                 'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']},
-                        {'iid': 11, 'type': '00000035-0000-1000-8000-0026BB765291', 'perms': ['pr']}  # No 'ev'
-                    ]
-                }]
+                'services': [
+                    {
+                        'characteristics': [
+                            {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']},
+                            {'iid': 11, 'type': '00000035-0000-1000-8000-0026BB765291', 'perms': ['pr']},  # No 'ev'
+                        ]
+                    }
+                ],
             }
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
@@ -834,33 +640,16 @@ class TestTadoLocalAPISetupPersistentEvents:
         assert (1, 10) in api_instance.change_tracker['event_characteristics']
         assert (1, 11) not in api_instance.change_tracker['event_characteristics']
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_handles_multiple_acc(self, api_instance, mock_pairing):
         """Test setup with multiple accessories."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing, 2: mock_pairing}
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            },
-            {
-                'aid': 2,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 20, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]},
+            {'aid': 2, 'services': [{'characteristics': [{'iid': 20, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]},
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         result = await api_instance.setup_persistent_events()
 
@@ -869,25 +658,15 @@ class TestTadoLocalAPISetupPersistentEvents:
         assert (1, 10) in call_args
         assert (2, 20) in call_args
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_handles_subscript_err(self, api_instance, mock_pairing):
         """Test handling of subscription errors."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]}
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         mock_pairing.subscribe.side_effect = Exception("Subscription failed")
 
@@ -895,25 +674,15 @@ class TestTadoLocalAPISetupPersistentEvents:
 
         assert result is False
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_callback_creates_task(self, api_instance, mock_pairing):
         """Test that event callback is registered and callable."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
-            {
-                'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}
-                    ]
-                }]
-            }
+            {'aid': 1, 'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291', 'perms': ['ev']}]}]}
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
@@ -924,44 +693,39 @@ class TestTadoLocalAPISetupPersistentEvents:
         callback = mock_pairing.dispatcher_connect.call_args[0][0]
         assert callable(callback)
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_empty_accessories_cache(self, api_instance, mock_pairing):
         """Test setup with empty accessories cache."""
         api_instance.pairing = mock_pairing
         api_instance.accessories_cache = []
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         result = await api_instance.setup_persistent_events()
 
         assert result is False
         mock_pairing.subscribe.assert_not_called()
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_mixed_permissions(self, api_instance, mock_pairing):
         """Test that only characteristics with 'ev' permission are subscribed."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
             {
                 'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': 'type1', 'perms': ['pr', 'ev']},  # Event
-                        {'iid': 11, 'type': 'type2', 'perms': ['pr']},         # No event
-                        {'iid': 12, 'type': 'type3', 'perms': ['pw', 'ev']},  # Event
-                        {'iid': 13, 'type': 'type4', 'perms': ['pw']}          # No event
-                    ]
-                }]
+                'services': [
+                    {
+                        'characteristics': [
+                            {'iid': 10, 'type': 'type1', 'perms': ['pr', 'ev']},  # Event
+                            {'iid': 11, 'type': 'type2', 'perms': ['pr']},  # No event
+                            {'iid': 12, 'type': 'type3', 'perms': ['pw', 'ev']},  # Event
+                            {'iid': 13, 'type': 'type4', 'perms': ['pw']},  # No event
+                        ]
+                    }
+                ],
             }
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
@@ -971,26 +735,18 @@ class TestTadoLocalAPISetupPersistentEvents:
         assert (1, 12) in call_args
         assert (1, 13) not in call_args
 
-
     @pytest.mark.asyncio
     async def test_setup_persistent_events_stores_subscribed_char(self, api_instance, mock_pairing):
         """Test that subscribed_characteristics is stored for cleanup."""
         api_instance.pairing = mock_pairing
+        api_instance.aid_to_pairing = {1: mock_pairing}
         api_instance.accessories_cache = [
             {
                 'aid': 1,
-                'services': [{
-                    'characteristics': [
-                        {'iid': 10, 'type': 'type1', 'perms': ['ev']},
-                        {'iid': 11, 'type': 'type2', 'perms': ['ev']}
-                    ]
-                }]
+                'services': [{'characteristics': [{'iid': 10, 'type': 'type1', 'perms': ['ev']}, {'iid': 11, 'type': 'type2', 'perms': ['ev']}]}],
             }
         ]
-        api_instance.change_tracker = {
-            'event_characteristics': set(),
-            'last_values': {}
-        }
+        api_instance.change_tracker = {'event_characteristics': set(), 'last_values': {}}
 
         await api_instance.setup_persistent_events()
 
@@ -1059,20 +815,15 @@ class TestTadoLocalHandleChange:
             {
                 'aid': 1,
                 'id': "dev-1",
-                'services': [{
-                    'characteristics': [     # CurrentTemperature
-                        {'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291'}
-                    ]
-                }]
+                'services': [{'characteristics': [{'iid': 10, 'type': '00000011-0000-1000-8000-0026BB765291'}]}],  # CurrentTemperature
             }
         ]
         api_instance.state_manager.get_device_info.return_value = {
             'zone_name': 'Living',
             'name': 'Thermostat',
-            'is_zone_leader': False  # avoid window detection path
+            'is_zone_leader': False,  # avoid window detection path
         }
-        api_instance.state_manager.update_device_characteristic.return_value \
-                = ("current_temperature", 20.0, 22.5)
+        api_instance.state_manager.update_device_characteristic.return_value = ("current_temperature", 20.0, 22.5)
         api_instance.broadcast_state_change = AsyncMock()
         api_instance._handle_window_open_detection = Mock()
 
@@ -1177,20 +928,15 @@ class TestTadoLocalHandleChange:
         """Test that window open detection is triggered for temperature changes."""
         self._setup_handle_change(api_instance)
         api_instance.characteristic_map[(1, 10)] = "CurrentTemperature"
-        api_instance.state_manager.get_device_info.return_value = {
-            'zone_name': 'Living',
-            'name': 'Thermostat',
-            'is_zone_leader': True
-        }
+        api_instance.state_manager.get_device_info.return_value = {'zone_name': 'Living', 'name': 'Thermostat', 'is_zone_leader': True}
 
         await api_instance.handle_change(1, 10, {"value": 22.5})
 
         assert api_instance.change_tracker['polling_changes'] == 1
         api_instance._handle_window_open_detection.assert_called_once_with(
-            'dev-1',
-            {'zone_name': 'Living', 'name': 'Thermostat', 'is_zone_leader': True},
-            '00000011-0000-1000-8000-0026bb765291'
+            'dev-1', {'zone_name': 'Living', 'name': 'Thermostat', 'is_zone_leader': True}, '00000011-0000-1000-8000-0026bb765291'
         )
+
 
 class TestTadoLocalAPIHandleWindowOpenDetection:
     def _setup_window_detection(self, api_instance):
@@ -1252,8 +998,7 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
             "latest_entry": (21.0, 1, 1000),
         }
 
-        with patch.object(api_instance, "_cancel_window_close_timer") as mock_cancel, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_cancel_window_close_timer") as mock_cancel, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 2)
@@ -1268,8 +1013,7 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
             "latest_entry": (21.0, 0, 1990),  # drop = 1.5
         }
 
-        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 1)
@@ -1284,8 +1028,7 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
             "latest_entry": (21.3, 0, 1990),  # drop = 0.7
         }
 
-        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 0)
@@ -1299,11 +1042,10 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
         api_instance.state_manager.get_device_history_info.return_value = {
             "history_count": 2,
             "earliest_entry": (21.0, 0, 1940),
-            "latest_entry": (22.5, 0, 1990),     # temp_change = 1.5
+            "latest_entry": (22.5, 0, 1990),  # temp_change = 1.5
         }
 
-        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 1)
@@ -1317,11 +1059,10 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
         api_instance.state_manager.get_device_history_info.return_value = {
             "history_count": 2,
             "earliest_entry": (21.0, 0, 1940),
-            "latest_entry": (21.3, 0, 1990),     # temp_change = 0.3
+            "latest_entry": (21.3, 0, 1990),  # temp_change = 0.3
         }
 
-        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 0)
@@ -1341,8 +1082,7 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
             "latest_entry": (21.0, 0, 1990),  # drop = 1.5
         }
 
-        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, \
-             patch("time.time", return_value=2000):
+        with patch.object(api_instance, "_schedule_window_close_timer") as mock_schedule, patch("time.time", return_value=2000):
             api_instance._handle_window_open_detection(device_id, device_info, char_type)
 
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 1)
@@ -1373,6 +1113,7 @@ class TestTadoLocalAPIHandleWindowOpenDetection:
 
         # Window should be set to rest state (2)
         api_instance.state_manager.update_device_window_status.assert_called_once_with(device_id, 2)
+
 
 class TestTadoLocalAPIScheduleWindowCloseTimer:
     @pytest.mark.asyncio
@@ -1436,8 +1177,7 @@ class TestTadoLocalAPIScheduleWindowCloseTimer:
         device_id = "dev-1"
         delay = 1  # 1 minute (in real use, but we'll mock the handler)
 
-        with patch.object(api_instance,
-                    "_window_close_handler", new_callable=AsyncMock) as mock_handler:
+        with patch.object(api_instance, "_window_close_handler", new_callable=AsyncMock) as mock_handler:
             mock_handler.return_value = None
             api_instance._schedule_window_close_timer(device_id, delay, {"zone_name": "Living"})
 
@@ -1450,8 +1190,7 @@ class TestTadoLocalAPIScheduleWindowCloseTimer:
                 pass
 
         # Task should be cleaned up after completion
-        assert device_id not in api_instance.window_close_timers \
-                 or api_instance.window_close_timers[device_id].done()
+        assert device_id not in api_instance.window_close_timers or api_instance.window_close_timers[device_id].done()
 
     @pytest.mark.asyncio
     async def test_schedule_window_close_timer_multiple_devices(self, api_instance):
@@ -1469,6 +1208,7 @@ class TestTadoLocalAPIScheduleWindowCloseTimer:
         for device_id in device_ids:
             assert device_id in api_instance.window_close_timers
             assert asyncio.isfuture(api_instance.window_close_timers[device_id])
+
 
 class TestTadoLocalAPICancelWindowCloseTimer:
     @pytest.mark.asyncio
@@ -1587,8 +1327,7 @@ class TestTadoLocalAPIWindowCloseHandler:
 
         api_instance.state_manager.get_current_state.return_value = {"window": 1}
 
-        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, \
-             patch("time.time", return_value=1000):
+        with patch("asyncio.sleep", new_callable=AsyncMock) as mock_sleep, patch("time.time", return_value=1000):
             await api_instance._window_close_handler(device_id, device_info, closing_delay)
 
         # Should sleep for 60 seconds (1 minute * 60)
@@ -1783,6 +1522,7 @@ class TestTadoLocalAPIWindowCloseTimerStop:
         # Task should be cleaned up
         assert device_id not in api_instance.window_close_timers
 
+
 class TestTadoLocalAPIBroadcastEvent:
     @pytest.mark.asyncio
     async def test_broadcast_event_sends_to_all_listeners(self, api_instance):
@@ -1910,12 +1650,7 @@ class TestTadoLocalAPIBroadcastEvent:
         mock_listener = AsyncMock()
         api_instance.event_listeners = [mock_listener]
 
-        event_data = {
-            "type": "device",
-            "device": "dev-1",
-            "value": 22.5,
-            "timestamp": 1234567890
-        }
+        event_data = {"type": "device", "device": "dev-1", "value": 22.5, "timestamp": 1234567890}
 
         await api_instance.broadcast_event(event_data)
 
@@ -1977,6 +1712,7 @@ class TestTadoLocalAPICelsiusToFahrenheit:
         result = api_instance._celsius_to_fahrenheit(20.123)
         assert result == 68.2  # 20.123 * 9/5 + 32 = 68.2214, rounded to 68.2
 
+
 class TestTadoLocalAPIBuildDeviceState:
     def test_build_device_state_with_valid_data(self, api_instance):
         """Test building device state with valid temperature and state data."""
@@ -1988,11 +1724,9 @@ class TestTadoLocalAPIBuildDeviceState:
             'target_heating_cooling_state': 1,
             'current_heating_cooling_state': 1,
             'valve_position': 75,
-            'window': 0
+            'window': 0,
         }
-        api_instance.state_manager.device_info_cache = {
-            'dev-1': {'battery_state': 'NORMAL'}
-        }
+        api_instance.state_manager.device_info_cache = {'dev-1': {'battery_state': 'NORMAL'}}
 
         result = api_instance._build_device_state('dev-1')
 
@@ -2014,9 +1748,7 @@ class TestTadoLocalAPIBuildDeviceState:
             'current_temperature': 20.0,
             'target_temperature': 21.5,
         }
-        api_instance.state_manager.device_info_cache = {
-            'dev-1': {'battery_state': 'LOW'}
-        }
+        api_instance.state_manager.device_info_cache = {'dev-1': {'battery_state': 'LOW'}}
 
         result = api_instance._build_device_state('dev-1')
 
@@ -2029,9 +1761,7 @@ class TestTadoLocalAPIBuildDeviceState:
             'current_temperature': 20.0,
             'target_temperature': 21.5,
         }
-        api_instance.state_manager.device_info_cache = {
-            'dev-1': {'battery_state': 'UNKNOWN'}
-        }
+        api_instance.state_manager.device_info_cache = {'dev-1': {'battery_state': 'UNKNOWN'}}
 
         result = api_instance._build_device_state('dev-1')
 
@@ -2044,9 +1774,7 @@ class TestTadoLocalAPIBuildDeviceState:
             'current_temperature': 20.0,
             'target_temperature': 21.5,
         }
-        api_instance.state_manager.device_info_cache = {
-            'dev-1': {}
-        }
+        api_instance.state_manager.device_info_cache = {'dev-1': {}}
 
         result = api_instance._build_device_state('dev-1')
 
@@ -2247,11 +1975,11 @@ class TestTadoLocalAPIBroadcastStateChange:
                 'target_heating_cooling_state': 1,
                 'current_heating_cooling_state': 1,
                 'window': 0,
-            }
+            },
         ]
         api_instance.state_manager.device_info_cache = {
             'dev-1': {'zone_id': 'zone-1', 'is_circuit_driver': True},
-            'dev-2': {'zone_id': 'zone-1', 'is_circuit_driver': False}
+            'dev-2': {'zone_id': 'zone-1', 'is_circuit_driver': False},
         }
         api_instance.state_manager.zone_cache = {
             'zone-1': {
@@ -2295,11 +2023,9 @@ class TestTadoLocalAPIBroadcastStateChange:
                 'target_heating_cooling_state': 1,
                 'current_heating_cooling_state': 0,
                 'window': 0,
-            }
+            },
         ]
-        api_instance.state_manager.device_info_cache = {
-            'dev-1': {'zone_id': 'zone-1', 'is_circuit_driver': True}
-        }
+        api_instance.state_manager.device_info_cache = {'dev-1': {'zone_id': 'zone-1', 'is_circuit_driver': True}}
         api_instance.state_manager.zone_cache = {
             'zone-1': {
                 'name': 'Living',
@@ -2317,7 +2043,6 @@ class TestTadoLocalAPIBroadcastStateChange:
         zone_call = api_instance.broadcast_event.call_args_list[1][0][0]
         # Zone cur_heating should be 0 (from circuit driver)
         assert zone_call['state']['cur_heating'] == 0
-
 
     @pytest.mark.asyncio
     async def test_broadcast_state_change_handles_exception(self, api_instance):
@@ -2349,6 +2074,7 @@ class TestTadoLocalAPIBroadcastStateChange:
         call_args = api_instance.broadcast_event.call_args[0][0]
         assert call_args['timestamp'] == 1234567890.0
 
+
 class TestTadoLocalAPIPollingSystem:
     @pytest.mark.asyncio
     async def test_setup_polling_system_collects_chars_and_starts_task(self, api_instance):
@@ -2356,11 +2082,13 @@ class TestTadoLocalAPIPollingSystem:
             {
                 "aid": 1,
                 "services": [
-                    {"characteristics": [
-                        {"iid": 10, "perms": ["ev", "pr"]},   # include
-                        {"iid": 11, "perms": ["pr"]},         # skip
-                        {"iid": 12, "perms": ["ev", "pr"]},   # include
-                    ]}
+                    {
+                        "characteristics": [
+                            {"iid": 10, "perms": ["ev", "pr"]},  # include
+                            {"iid": 11, "perms": ["pr"]},  # skip
+                            {"iid": 12, "perms": ["ev", "pr"]},  # include
+                        ]
+                    }
                 ],
             }
         ]
@@ -2416,15 +2144,14 @@ class TestTadoLocalAPIBackgroundPollingLoop:
         api_instance.is_shutting_down = False
         api_instance.pairing = True
         api_instance.monitored_characteristics = [(1, 10), (1, 11)]
-        api_instance.characteristic_map[(1, 10)] = "CurrentHumidity"   # priority
+        api_instance.characteristic_map[(1, 10)] = "CurrentHumidity"  # priority
         api_instance.characteristic_map[(1, 11)] = "CurrentTemperature"
         api_instance._poll_characteristics = AsyncMock()
 
         async def sleep_once(_seconds):
             api_instance.is_shutting_down = True
 
-        with patch("asyncio.sleep", side_effect=sleep_once), \
-             patch("time.time", return_value=130):
+        with patch("asyncio.sleep", side_effect=sleep_once), patch("time.time", return_value=130):
             await api_instance.background_polling_loop()
 
         # FAST-POLL should be called for humidity char
@@ -2443,8 +2170,7 @@ class TestTadoLocalAPIBackgroundPollingLoop:
         async def sleep_once(_seconds):
             api_instance.is_shutting_down = True
 
-        with patch("asyncio.sleep", side_effect=sleep_once), \
-             patch("time.time", return_value=130):
+        with patch("asyncio.sleep", side_effect=sleep_once), patch("time.time", return_value=130):
             await api_instance.background_polling_loop()
 
         api_instance._poll_characteristics.assert_not_called()
@@ -2465,12 +2191,12 @@ class TestTadoLocalAPIBackgroundPollingLoop:
             if seconds == 5:
                 api_instance.is_shutting_down = True
 
-        with patch("asyncio.sleep", side_effect=sleep_side_effect), \
-             patch("time.time", return_value=130):
+        with patch("asyncio.sleep", side_effect=sleep_side_effect), patch("time.time", return_value=130):
             await api_instance.background_polling_loop()
 
         assert 10 in sleep_calls
         assert 5 in sleep_calls
+
 
 class TestTadoLocalAPIPollCharacteristics:
     @pytest.mark.asyncio
@@ -2498,9 +2224,7 @@ class TestTadoLocalAPIPollCharacteristics:
         char_list = [(1, 1), (1, 2), (1, 3)]
 
         api_instance.pairing = Mock()
-        api_instance.pairing.get_characteristics = AsyncMock(
-            return_value={(1, 1): {"value": 10}, (1, 3): {"value": 30}}
-        )
+        api_instance.pairing.get_characteristics = AsyncMock(return_value={(1, 1): {"value": 10}, (1, 3): {"value": 30}})
         api_instance.handle_change = AsyncMock()
 
         await api_instance._poll_characteristics(char_list)
@@ -2516,9 +2240,7 @@ class TestTadoLocalAPIPollCharacteristics:
 
         second_batch = {(1, i): {"value": i} for i in range(16, 21)}
         api_instance.pairing = Mock()
-        api_instance.pairing.get_characteristics = AsyncMock(
-            side_effect=[Exception("batch fail"), second_batch]
-        )
+        api_instance.pairing.get_characteristics = AsyncMock(side_effect=[Exception("batch fail"), second_batch])
         api_instance.handle_change = AsyncMock()
 
         await api_instance._poll_characteristics(char_list)
@@ -2616,9 +2338,7 @@ class TestTadoLocalAPISetDeviceCharacteristics:
         api_instance.pairing.put_characteristics = AsyncMock()
         api_instance.state_manager = Mock(spec=DeviceStateManager)
         api_instance.state_manager.get_device_info.return_value = {"id": 1, "aid": 100}
-        api_instance.accessories_cache = [
-            {"aid": 100, "services": [{"characteristics": [{"iid": 10, "type": "some-other-type"}]}]}
-        ]
+        api_instance.accessories_cache = [{"aid": 100, "services": [{"characteristics": [{"iid": 10, "type": "some-other-type"}]}]}]
 
         with pytest.raises(ValueError, match="No valid characteristics to set"):
             await api_instance.set_device_characteristics(1, {"target_temperature": 21.0})
@@ -2636,11 +2356,7 @@ class TestTadoLocalAPISetDeviceCharacteristics:
         api_instance.accessories_cache = [
             {
                 "aid": 100,
-                "services": [
-                    {"characteristics": [
-                        {"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE}
-                    ]}
-                ],
+                "services": [{"characteristics": [{"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE}]}],
             }
         ]
 
@@ -2661,10 +2377,12 @@ class TestTadoLocalAPISetDeviceCharacteristics:
             {
                 "aid": 100,
                 "services": [
-                    {"characteristics": [
-                        {"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE},
-                        {"iid": 11, "type": DeviceStateManager.CHAR_TARGET_HEATING_COOLING},
-                    ]}
+                    {
+                        "characteristics": [
+                            {"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE},
+                            {"iid": 11, "type": DeviceStateManager.CHAR_TARGET_HEATING_COOLING},
+                        ]
+                    }
                 ],
             }
         ]
@@ -2678,9 +2396,7 @@ class TestTadoLocalAPISetDeviceCharacteristics:
         )
 
         assert ok is True
-        api_instance.pairing.put_characteristics.assert_awaited_once_with(
-            [(100, 10, 20.5), (100, 11, 1)]
-        )
+        api_instance.pairing.put_characteristics.assert_awaited_once_with([(100, 10, 20.5), (100, 11, 1)])
 
     @pytest.mark.asyncio
     async def test_set_device_char_ignores_unknown_char_and_sets_valid(self, api_instance):
@@ -2693,11 +2409,7 @@ class TestTadoLocalAPISetDeviceCharacteristics:
         api_instance.accessories_cache = [
             {
                 "aid": 100,
-                "services": [
-                    {"characteristics": [
-                        {"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE}
-                    ]}
-                ],
+                "services": [{"characteristics": [{"iid": 10, "type": DeviceStateManager.CHAR_TARGET_TEMPERATURE}]}],
             }
         ]
 

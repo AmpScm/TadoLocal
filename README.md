@@ -345,7 +345,21 @@ Options:
   --pin XXX-XX-XXX      HomeKit PIN for initial pairing
   --port PORT           API server port (default: 4407)
   --clear-pairings      Clear all existing pairings before starting
+  --accessory-ip IP     IP of a standalone HomeKit accessory (repeatable)
+  --accessory-pin PIN   HomeKit PIN for a standalone accessory (repeatable)
 ```
+
+#### Standalone Accessories
+
+Some Tado products (e.g. Smart AC Control V3+) are standalone HomeKit accessories
+that pair independently from the bridge. You can include them alongside the bridge:
+
+```bash
+tado-local --bridge-ip 192.168.1.100 --accessory-ip 192.168.1.101 --accessory-pin 987-65-432
+```
+
+Multiple accessories can be added by repeating the flags. Their zones will appear
+in the same API alongside the bridge zones.
 
 ### Optional Authentication
 
@@ -620,6 +634,8 @@ Options:
   --pin XXX-XX-XXX      HomeKit PIN for initial pairing
   --port PORT           API server port (default: 4407)
   --clear-pairings      Clear all existing pairings before starting
+  --accessory-ip IP     IP of a standalone HomeKit accessory (repeatable)
+  --accessory-pin PIN   HomeKit PIN for a standalone accessory (repeatable)
 ```
 
 ---

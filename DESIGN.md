@@ -111,9 +111,10 @@ tado-local/
 **Purpose**: Command-line interface and application bootstrap
 
 **Key Responsibilities**:
-- Parse command-line arguments (`--bridge-ip`, `--pin`, `--port`, `--state`)
+- Parse command-line arguments (`--bridge-ip`, `--pin`, `--port`, `--state`, `--accessory-ip`, `--accessory-pin`)
 - Initialize database and create API instance
 - Manage bridge pairing (load existing or create new)
+- Optionally pair standalone HomeKit accessories (e.g. Smart AC Control V3+)
 - Start OAuth2 device flow for cloud authentication (browser-based)
 - Configure and start uvicorn web server
 - Handle graceful shutdown and cleanup
@@ -126,7 +127,8 @@ main()
   │   ├── TadoLocalAPI.__init__(db_path)
   │   ├── create_app() + register_routes()
   │   ├── TadoBridge.pair_or_load()
-  │   ├── TadoLocalAPI.initialize(pairing)
+  │   ├── TadoBridge.pair_or_load_accessory()  # for each --accessory-ip
+  │   ├── TadoLocalAPI.initialize(pairing, extra_pairings=...)
   │   └── uvicorn.Server.serve()
   └── cleanup()
 ```
