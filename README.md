@@ -561,6 +561,7 @@ climate:
     name: "Living Room Heating"
     # Configure with REST commands
 ```
+The ["tado-local"](https://github.com/array81/tado-local) Home Assistant custom component is build to work with TadoLocal.
 
 **Contributions welcome!** If you'd like to build a native Home Assistant integration or HACS addon, we'd be happy to review PRs.
 
@@ -833,7 +834,7 @@ tado-local --bridge-ip 192.168.1.100 --pin 123-45-678
 **Priority areas needing help**:
 
 - [x] **Domoticz plugin** - ✅ Already available in `domoticz/` directory!
-- [ ] **Home Assistant HACS integration** - Native HA component using the REST API
+- [x] **Home Assistant HACS integration** - Native HA component using the REST API ✅ [tado-local](https://github.com/array81/tado-local)
 - [ ] **openHAB binding** - Java-based binding for openHAB users
 - [ ] **Node-RED nodes** - Custom nodes for easy flow integration
 - [ ] **ioBroker adapter** - Adapter for ioBroker platform
@@ -1019,14 +1020,13 @@ All dependencies use permissive open source licenses compatible with Apache 2.0:
 - **Cross-platform**: Windows, FreeBSD, Linux
 
 🚧 **Integration Priorities**:
-- Home Assistant HACS component
 - openHAB binding
 - Node-RED custom nodes
 - Docker container for easier deployment
 - More integration examples and tutorials
 
 🔧 **Backend Improvements**:
-- Comprehensive test coverage
+- Comprehensive test coverage (now 60% code coverage)
 - API versioning for stability
 - Multi-bridge support
 - WebSocket alternative to SSE
