@@ -980,7 +980,7 @@ class BasePlugin:
                     )
                     device.Create()
                     Domoticz.Log(f"Created temperature sensor: {zone_name} (Unit {temp_unit})")
-                    
+
                     # Set voicecontrol XML if enabled (after device creation)
                     if self.setup_voicecontrol and temp_unit in Devices:
                         # We need to get the idx values after creation, so we'll update on next cycle
@@ -1115,6 +1115,9 @@ class BasePlugin:
             mode = state.get('mode', 0)
             cur_heating = state.get('cur_heating', 0)
             battery_low = state.get('battery_low', False)
+
+            if humidity is not None:
+                humidity = float(humidity)
 
             # Skip update if critical values are missing
             if cur_temp is None:
