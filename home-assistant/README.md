@@ -1,36 +1,56 @@
 
 # TadoLocal Server – Home Assistant App (Add-on)
 
-This app runs the **TadoLocal Server** inside Home Assistant, allowing local communication with your Tado devices without relying on the cloud.
+![Home Assistant](https://img.shields.io/badge/Home%20Assistant-App-blue)
+![Architecture](https://img.shields.io/badge/Architecture-amd64%20%7C%20armhf%20%7C%20armv7-orange)
+![License](https://img.shields.io/github/license/AmpScm/TadoLocal)
 
-The app provides a local API that can be used by the **TadoLocal Home Assistant custom integration**.
+This app runs the **TadoLocal Server** inside Home Assistant, allowing **local communication with Tado devices without relying on the cloud**.
+
+The app exposes a local API that can be used by the **TadoLocal Home Assistant custom integration**.
+
+---
+# Installation
+## Quick Install
+
+Install the add-on directly into Home Assistant:
+
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FAmpScm%2FTadoLocal)
+
+Steps:
+
+1. Click the button above
+2. Click **Open Link**
+3. Click **+ Add**
+4. Click **Close**
+5. Search for **TadoLocal Server** and click on it
+6. Click **Install**
+7. Follow the [Configuration](#configuration) section **before starting**
 
 ---
 
-# Installation
+## Manual Installation
 
-To install this app manually:
+If you prefer installing manually:
 
-1. SSH or SFTP into your Home Assistant filesystem.
-2. Navigate to the add-ons directory:
+1. SSH or SFTP into your Home Assistant filesystem
+2. Navigate to:
 
 ```
-
 /addons
-
 ```
 
-3. Create a new directory:
+3. Create the directory:
 
 ```
-
 /addons/tado-local-server
-
 ```
 
-4. Copy **all files from the `home-assistant` folder** of this repository into the `tado-local-server` directory. (Make sure run.sh is in Unix format not DOS)
+4. Copy **all files from the `home-assistant` folder** of this repository into that directory.
 
-File structure:
+Ensure `run.sh` is saved in **Unix format (LF)** and not **Windows format (CRLF)**.
+
+Example structure:
 
 ```
 /addons/
@@ -38,6 +58,7 @@ File structure:
     ├── config.yaml
     ├── Dockerfile
     ├── run.sh
+    ├── README.md
     ├── icon.png
     ├── logo.png
     └── translations/
@@ -47,26 +68,24 @@ File structure:
 
 5. Restart Home Assistant or reload add-ons.
 
-Then follow the Home Assistant developer guide for **installing and testing local add-ons**:
+Then follow the Home Assistant developer documentation:
 
 https://developers.home-assistant.io/docs/add-ons/tutorial
 
-For your information:
-The TadoServer python code will be downloaded directly from GitHub. If a new version appears you
-can press the **Rebuild** button on the TadoLocal Server App page.
-
- 
 ---
 
 # Configuration
+## Setup Tado Internet Bridge
 
-Before starting the app, configure the following options:
+Before starting the add-on, configure the following options:
 
 | Option | Description |
 |------|------|
 | **Bridge IP** | IP address of your Tado Bridge |
 | **Bridge PIN** | HomeKit PIN code of the Tado Bridge |
 | **Keep database private** | Determines where the `tado-local.db` file is stored |
+
+---
 
 ## Database Location
 
@@ -78,7 +97,7 @@ The database will be copied to:
 /config/.storage/tado-local.db
 ```
 
-This makes it accessible from Home Assistant via:
+This makes the database accessible from Home Assistant via:
 
 - Samba
 - Terminal
@@ -86,53 +105,53 @@ This makes it accessible from Home Assistant via:
 
 If **Keep database private = true**
 
-The database remains inside the container:
+The database stays inside the container:
 
 ```
 /data/tado-local.db
 ```
 
----
 
-# Accessories
+## Accessories
 
 Some devices require **separate pairing sessions**, for example:
 
-- **Tado Smart AC 3+ Control**
+- **Tado Smart AC Control V3+**
 
-You can add these devices in the configuration using the **Add button** and providing:
+You can add these accessories in the configuration using the **Add** button and providing:
 
 - Accessory IP address
 - HomeKit PIN code
 
+
 ---
+# Running TadoLocal Server
+## First Startup
 
-# First Startup
+When starting the add-on for the first time:
 
-When starting the Apps (add-on) for the first time:
-
-1. Open the TadoLocal Server App **Log** tab
+1. Open the **Log** tab of the TadoLocal Server add-on
 2. A URL will appear that you must open to authenticate with Tado.
 
 Alternatively:
 
-1. Click the **Open Web UI** button on the TadoLocal Server App page.
-2. Which opens the **TadoLocal Web GUI**
-3. Click **Authenticate** (center top)
+1. Click **Open Web UI** on the TadoLocal Server App page
+2. The **TadoLocal Web GUI** will open
+3. Click **Authenticate** in the Web GUI. (center top)
 
 ---
 
-# After Authentication
+## After Authentication
 
 After successful authentication:
 
-- The logs will confirm authentication.
-- The **TadoLocal services will start**.
-- The **zones will appear** in the Web GUI.
+- The logs will confirm authentication
+- The **TadoLocal services will start**
+- The **zones will appear** in the Web GUI
 
 ---
 
-# Home Assistant Integration (Devives & service)
+# Home Assistant Integration (Devices & Services)
 
 After the add-on is running successfully, install the **TadoLocal custom integration**:
 
@@ -140,15 +159,15 @@ https://github.com/array81/tado-local
 
 Follow the instructions in that repository.
 
-When configuring the integration, use:
+When configuring the integration, use: `localhost` as the IP address and the configured port (default **4407**).
 
-```
+---
 
-localhost
+# Updating
 
-```
+The TadoServer Python code is downloaded directly from GitHub.
 
-as the IP address.
+When a new version becomes available, simply click **Rebuild** on the TadoLocal Server add-on page.
 
 ---
 

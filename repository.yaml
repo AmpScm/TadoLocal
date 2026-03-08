@@ -1,5 +1,5 @@
 # https://developers.home-assistant.io/docs/add-ons/repository#repository-configuration
-name: TadoLocal Server Home Assistant add-on repository
-url: 'https://github.com/Bekkie/TadoLocal'
-maintainer: AmpScn <AmpScn.TadoLocal@email.com>
+name: TadoLocal Server Apps repository
+url: 'https://github.com/AmpScm/TadoLocal'
+maintainer: AmpScm <AmpScm.TadoLocal@email.com>
 

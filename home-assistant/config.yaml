@@ -18,7 +18,7 @@ map:
 options:
   bridge_ip: "1.2.3.4"
   bridge_pin: "123-45-678"
-  keep_db_private: false
+  keep_db_private: true
   accessories: []
 schema:
   bridge_ip: str
