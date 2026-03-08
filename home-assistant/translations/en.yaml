@@ -1,0 +1,27 @@
+name: "TadoLocal Server"
+description: "TadoLocal Server, based op AmpScm/TadoLocal"
+
+configuration:
+  bridge_ip:
+    name: "Bridge IP"
+    description: "IP address of the Tado bridge."
+
+  bridge_pin:
+    name: "Bridge PIN"
+    description: "HomeKit PIN code of the Tado bridge. (Format: xxx-xx-xxx)"
+
+  log_level:
+    name: "Log level"
+    description: "Set add-on logging verbosity. Use debug for more detailed startup and runtime logs."
+
+  keep_db_private:
+    name: "Keep database private"
+    description: "Store the TadoLocal database in the add-on data folder (/data) instead of placing it in the Home Assistant configuration folder (/config/.storage).
+By placing it in /config/.storage, it becomes accessible or editable via Home Assistant."
+
+  accessories:
+    name: "Accessories"
+    description: "List of Tado accessories to pair. (Like Smart AC Control)"
+
+network:
+  4407/tcp: "Port to use for the TadoLocal web server (default: 4407)"

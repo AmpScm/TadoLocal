@@ -1,18 +1,31 @@
 name: "TadoLocal Server"
 description: "TadoLocal Server, based on AmpScm/TadoLocal"
-version: "0.1.0"
+version: "1.1.1"
 slug: "tado-local-server"
 url: "https://github.com/AmpScm/TadoLocal"
 init: false
+webui: "http://[HOST]:[PORT:4407]"
 arch:
   - amd64
   - armhf
   - armv7
 ports:
   4407/tcp: 4407
+map:
+  - type: homeassistant_config
+    read_only: false
+    path: /homeassistant_config
 options:
   bridge_ip: "1.2.3.4"
   bridge_pin: "123-45-678"
+  keep_db_private: true
+  log_level: info
+  accessories: []
 schema:
   bridge_ip: str
-  bridge_pin: str 
+  bridge_pin: str
+  keep_db_private: bool
+  log_level: list(debug|info)
+  accessories:
+    - ip: str
+      pin: str
