@@ -70,7 +70,7 @@ Benefits:
 import asyncio
 import logging
 import time
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import sqlite3
 import json
@@ -204,7 +204,7 @@ class TadoCloudAPI:
     # User-Agent for API identification and communication channel
     USER_AGENT = f"TadoLocal/{__version__} (+https://github.com/ampscm/TadoLocal)"
 
-    def __init__(self, db_path: str, tado_api: TadoLocalAPI):
+    def __init__(self, db_path: str, tado_api: TadoLocalAPI, purge_history_days: Optional[int] = None):
         """Initialize Tado Cloud API client.
 
         Args:
@@ -218,6 +218,7 @@ class TadoCloudAPI:
         self.home_id: Optional[int] = None
         self._ensure_schema()
         self._load_tokens()
+        self.purge_history_days = purge_history_days
 
         # Background token refresh task
         self._refresh_task: Optional[asyncio.Task] = None
@@ -640,6 +641,16 @@ class TadoCloudAPI:
                                 zones = await self.get_zones()
                                 last_static_sync = current_time
 
+                                # Purge old history if configured (once per day is sufficient)
+                                if self.purge_history_days:
+                                    purge_result = self.tado_api.state_manager.purge_device_history(self.purge_history_days)
+                                    logger.debug(
+                                        "History purge during cloud sync: deleted=%s remaining=%s cutoff=%s",
+                                        purge_result.get('deleted_rows'),
+                                        purge_result.get('remaining_rows'),
+                                        purge_result.get('cutoff')
+                                    )
+
                             # Sync to database
                             from .sync import TadoCloudSync
                             sync = TadoCloudSync(self.db_path)
@@ -942,11 +953,148 @@ class TadoCloudAPI:
             logger.error(f"Error fetching {url}: {e}")
             return None
 
+    async def _switch_zones_to_smartschedule(
+        self,
+        zones: List[int],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Delete zone overlay to return to SMART Schedule via Tado Cloud API.
+        WARNING: This will cost an API call and should only be used for reseting manual overrides
+
+        Args:
+            zones: list of Zone IDs
+
+        Returns:
+            Response data dict or None on error
+        """
+        if aiohttp is None:
+            logger.error("aiohttp not installed")
+            return None
+
+        if not self.home_id:
+            logger.error("Cannot delete overlay: no home_id set")
+            return None
+
+        if zones is None or len(zones) == 0:
+            logger.error("No zones provided to enable SMART schedule")
+            return None
+
+        # Call API
+        try:
+            headers = await self.get_headers()
+
+            rooms = ",".join(str(zone) for zone in zones)
+            url = f"{self.API_BASE_URL}/homes/{self.home_id}/overlay?rooms={rooms}"
+
+            async with aiohttp.ClientSession() as session:
+                logger.debug(f"Deleting {url} to switch back to SMART schedule")
+                async with session.delete(url, headers=headers) as resp:
+                    # Update rate limit tracking from response headers
+                    self._update_rate_limit(resp.headers)
+
+                    # Success
+                    if resp.status == 204:
+                        logger.debug(f"Switched back to SMART schedule: Deleted {url}")
+                        return {"result": "success"}
+
+                    # Rate limit exceeded
+                    elif resp.status == 429:
+                        error_text = await resp.text()
+                        logger.error(f"Rate limit exceeded for {url}: {error_text}")
+                        logger.warning(f"Tado API rate limit: {self.rate_limit.remaining_calls}/{self.rate_limit.granted_calls} calls remaining")
+                        return None
+
+                    # Error
+                    else:
+                        error_text = await resp.text()
+                        data = await resp.json()
+                        logger.error(f"Failed to delete {url}: HTTP {resp.status} - {error_text} - {data} ")
+                        return None
+
+        except Exception as e:
+            logger.error(f"Error switching to SMART schedule {url}: {e}")
+            return None
+
+    async def _switch_zones_persistant_off(
+        self,
+        zones: List[int],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Put zone overlay to persistant off mode via Tado Cloud API.
+        WARNING: This will cost an API call and should be used with care
+
+        Args:
+            zones: list of Zone IDs
+
+        Returns:
+            Response data dict or None on error
+        """
+        if aiohttp is None:
+            logger.error("aiohttp not installed")
+            return None
+
+        if not self.home_id:
+            logger.error("Cannot set overlay: no home_id set")
+            return None
+
+        if zones is None or len(zones) == 0:
+            logger.error("No zones provided to set persistent off overlay")
+            return None
+
+        # Call API
+        try:
+            headers = await self.get_headers()
+
+            data = {"overlays": []}
+            for zone in zones:
+                data["overlays"].append({
+                    "overlay": {
+                        "setting": {
+                            "power": "OFF",
+                            "type": "HEATING"
+                        },
+                        "termination": {
+                            "typeSkillBasedApp": "MANUAL"}
+                    },
+                    "room": zone
+                })
+
+            url = f"{self.API_BASE_URL}/homes/{self.home_id}/overlay"
+
+            async with aiohttp.ClientSession() as session:
+                logger.debug(f"Putting {url} to switch SMART schedule persistant off")
+                async with session.post(url, headers=headers, json=data) as resp:
+                    # Update rate limit tracking from response headers
+                    self._update_rate_limit(resp.headers)
+
+                    # Success
+                    if resp.status == 204:
+                        logger.debug(f"Set persistent OFF overlay via {url}")
+                        return {"result": "success"}
+
+                    # Rate limit exceeded
+                    elif resp.status == 429:
+                        error_text = await resp.text()
+                        logger.error(f"Rate limit exceeded for {url}: {error_text}")
+                        logger.warning(f"Tado API rate limit: {self.rate_limit.remaining_calls}/{self.rate_limit.granted_calls} calls remaining")
+                        return None
+
+                    # Error
+                    else:
+                        error_text = await resp.text()
+                        logger.error(f"Failed to POST {url}: HTTP {resp.status} - {error_text}")
+                        return None
+
+        except Exception as e:
+            logger.error(f"Error switching off SMART schedule {url}: {e}")
+            return None
+
     # ========================================================================
     # Tado Cloud API Methods
     # ========================================================================
 
     async def get_home_info(self, force_refresh: bool = False) -> Optional[Dict[str, Any]]:
+
         """
         Get home information from Tado Cloud API.
 

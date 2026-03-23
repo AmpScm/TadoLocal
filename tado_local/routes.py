@@ -44,6 +44,12 @@ security = HTTPBearer(auto_error=False)
 API_KEYS_RAW = os.environ.get('TADO_API_KEYS', '').strip()
 API_KEYS = set(key.strip() for key in API_KEYS_RAW.split() if key.strip()) if API_KEYS_RAW else set()
 
+MODE_LABELS = {
+    0: "OFF",
+    1: "HEAT",
+    2: "COOL"
+}
+
 
 def get_api_key(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[str]:
     """
@@ -324,7 +330,7 @@ def register_routes(app: FastAPI, get_tado_api):
         for accessory in accessories:
             services = accessory.get('services', [])
             for service in services:
-                if service.get('type') == '0000004A-0000-1000-8000-0026BB765291':  # Thermostat service
+                if service.get('type').upper() == '0000004A-0000-1000-8000-0026BB765291':  # Thermostat service
 
                     device_id = accessory.get('id')
                     if not device_id:
@@ -357,7 +363,7 @@ def register_routes(app: FastAPI, get_tado_api):
                             'target_temp_c': target_temp_c,
                             'target_temp_f': round(target_temp_c * 9/5 + 32, 1) if target_temp_c is not None else None,
                             'mode': state.get('target_heating_cooling_state', 0),
-                            'cur_heating': 1 if state.get('current_heating_cooling_state') == 1 else 0,
+                            'cur_heating': state.get('current_heating_cooling_state'),
                             'valve_position': state.get('valve_position'),
                             'battery_low': battery_low,
                         }
@@ -390,7 +396,7 @@ def register_routes(app: FastAPI, get_tado_api):
         # Check if it's a thermostat
         is_thermostat = False
         for service in accessory.get('services', []):
-            if service.get('type') == '0000004A-0000-1000-8000-0026BB765291':
+            if service.get('type').upper() == '0000004A-0000-1000-8000-0026BB765291':
                 is_thermostat = True
                 break
 
@@ -424,7 +430,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': target_temp_c,
                 'target_temp_f': round(target_temp_c * 9/5 + 32, 1) if target_temp_c is not None else None,
                 'mode': state.get('target_heating_cooling_state', 0),
-                'cur_heating': 1 if state.get('current_heating_cooling_state') == 1 else 0,
+                'cur_heating': state.get('current_heating_cooling_state'),
                 'valve_position': state.get('valve_position'),
                 'battery_low': battery_low,
             }
@@ -441,7 +447,7 @@ def register_routes(app: FastAPI, get_tado_api):
         - Current temperature (°C and °F)
         - Current humidity (%)
         - Target temperature (°C and °F)
-        - Mode (0=Off, 1=Heat) - TargetHeatingCoolingState
+        - Mode (0=Off, 1=Heat, 2=Cool) - TargetHeatingCoolingState
         - Currently heating (0=Off, 1=Heating, 2=Cooling) - CurrentHeatingCoolingState
 
         Note: Mode values depend on device capabilities. Heating-only devices typically
@@ -470,6 +476,7 @@ def register_routes(app: FastAPI, get_tado_api):
             order_id = zone_info['order_id']
             leader_serial = zone_info['leader_serial']
             leader_type = zone_info['leader_type']
+            zone_type = zone_info['zone_type']
             is_circuit_driver = zone_info['is_circuit_driver']
             tado_zone_id = zone_info['tado_zone_id']
             window_open_time = zone_info['window_open_time']
@@ -520,15 +527,15 @@ def register_routes(app: FastAPI, get_tado_api):
                         # Circuit driver WITH other devices - use radiator valve heating state (real state)
                         for dev_id in other_devices:
                             dev_state = tado_api.state_manager.get_current_state(dev_id)
-                            if dev_state and dev_state.get('current_heating_cooling_state') == 1:
-                                cur_heating = 1
+                            if dev_state and dev_state.get('current_heating_cooling_state') in (1, 2):
+                                cur_heating = dev_state.get('current_heating_cooling_state')
                                 break
                     else:
                         # Circuit driver ALONE in zone - use its own heating state
-                        cur_heating = 1 if zone_state.get('current_heating_cooling_state') == 1 else 0
+                        cur_heating = zone_state.get('current_heating_cooling_state')
                 else:
                     # Regular zone leader (not circuit driver) - use its heating state
-                    cur_heating = 1 if zone_state.get('current_heating_cooling_state') == 1 else 0
+                    cur_heating = zone_state.get('current_heating_cooling_state')
 
                 # Convert temperatures to Fahrenheit
                 cur_temp_f = round(current_temp * 9/5 + 32, 1) if current_temp is not None else None
@@ -563,6 +570,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'leader_device_id': leader_device_id,
                 'leader_serial': leader_serial,
                 'leader_type': leader_type,
+                'zone_type': zone_type,
                 'tado_zone_id': tado_zone_id,
                 'is_circuit_driver': bool(is_circuit_driver),
                 'order_id': order_id,
@@ -594,6 +602,190 @@ def register_routes(app: FastAPI, get_tado_api):
             'homes': homes,
             'zones': zones,
             'count': len(zones)
+        }
+
+    @app.post("/zones/set", tags=["Zones"])
+    async def set_all_zones(
+                    heating_enabled: Optional[bool] = None,
+                    persistant: Optional[bool] = False,
+                    api_key: Optional[str] = Depends(get_api_key)
+                ):
+        """
+        Set heating mode for all zones, with optional persistent cloud handling.
+
+        Control a zone's heating via its leader device or via Cloud API for persistent control.
+
+        Args:
+            zone_id: Zone ID to control
+            heating_enabled: Enable/disable heating mode (true/false) TRUE return to last know heating mode (heat/cool) FALSE turn off heating.
+            persistant: If true, a Cloud API command will be sent to  enable/disable the SMART schedule for unlimited time.
+                        This will cost a cloud API call and requires the cloud API to be enabled and authenticated.
+                        If false, a temporary overlay will be applied that will automatically expire according the Tado App setting.
+
+        Returns:
+            Success status and applied values
+
+        Notes:
+            - Commands are sent to the zone's leader device
+            - The leader propagates changes to other devices as needed
+            - heating_enabled controls the heat/cool mode (OFF=0, HEAT=1/COOL=2 depending on last active mode)
+            - if persistant is true, the SMART schedule will be enabled/disabled via Cloud API
+              for unlimited time until manually changed again. This is useful for scenarios like
+              "away mode" where you want to ensure the setting persists stop the SMART schedule from re-enabling heating.
+              heating_enabled=true + persistant=true will enable the SMART schedule again.
+              If persistant is false, a temporary overlay will be applied that will automatically expire
+              according the Tado App setting.
+        """
+
+        tado_api = get_tado_api()
+        if not tado_api:
+            raise HTTPException(status_code=503, detail="API not initialized")
+
+        if heating_enabled is None:
+            raise HTTPException(status_code=400, detail="At heating mode should be given")
+
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        cursor = conn.execute(
+            """
+            SELECT z.zone_id, z.name, z.tado_zone_id, z.leader_device_id, d.serial_number, z.zone_type
+            FROM zones z
+            LEFT JOIN devices d ON z.leader_device_id = d.device_id
+            ORDER BY z.zone_id
+            """
+        )
+        zones = cursor.fetchall()
+        conn.close()
+
+        if not zones:
+            return {
+                'success': True,
+                'count': 0,
+                'handling': 'noop',
+                'zones': []
+            }
+
+        if persistant is True:
+            cloud_api = getattr(tado_api, 'cloud_api', None)
+            if not cloud_api:
+                raise HTTPException(status_code=503, detail="Persistent mode requires cloud API to be enabled")
+            if not cloud_api.is_authenticated():
+                raise HTTPException(status_code=401, detail="Persistent mode requires cloud API authentication")
+
+            missing_tado_zone_ids = [zone_name for _, zone_name, tado_zone_id, _, _, _ in zones if not tado_zone_id]
+            if missing_tado_zone_ids:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Zones missing tado_zone_id required for cloud control: {', '.join(missing_tado_zone_ids)}"
+                )
+
+            tado_zone_ids = [tado_zone_id for zi, n, tado_zone_id, ldi, sn, zt in zones]
+
+            try:
+                if heating_enabled:
+                    cloud_result = await cloud_api._switch_zones_to_smartschedule(tado_zone_ids)
+                else:
+                    cloud_result = await cloud_api._switch_zones_persistant_off(tado_zone_ids)
+
+                if cloud_result is None:
+                    raise HTTPException(status_code=502, detail="Cloud API command failed")
+
+                logger.info("All zones: smart-schedule=%s via Cloud API", heating_enabled)
+
+                return {
+                    'success': True,
+                    'count': len(zones),
+                    'handling': 'cloud_call',
+                    'applied': {
+                        'target_temperature': None,
+                        'heating_enabled': heating_enabled
+                    },
+                    'zones': [
+                        {
+                            'zone_id': zone_id,
+                            'zone_name': zone_name,
+                            'tado_zone_id': tado_zone_id
+                        }
+                        for zone_id, zone_name, tado_zone_id, id, sn, zt_ in zones
+                    ]
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed persistent control for all zones: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to set persistent cloud control for all zones: {str(e)}")
+
+        if not tado_api.pairing:
+            raise HTTPException(status_code=503, detail="Bridge not connected")
+
+        char_updates = {
+            'target_heating_cooling_state': None     # will be set per zone based on heating_enabled and zone type (HEATING vs AIR_CONDITIONING)
+        }
+
+        conn = sqlite3.connect(tado_api.state_manager.db_path)
+        results = []
+        errors = []
+        for zone_id, zone_name, _, leader_device_id, leader_serial, zone_type in zones:
+            # Fallback: if zone has no explicit leader, use first device in zone
+            if not leader_device_id:
+                cur = conn.execute(
+                    "SELECT device_id, serial_number FROM devices WHERE zone_id = ? ORDER BY device_id LIMIT 1",
+                    (zone_id,)
+                )
+                dev = cur.fetchone()
+                if dev:
+                    leader_device_id, leader_serial = dev
+                    logger.warning(
+                        "Zone %s ('%s') has no leader assigned; falling back to device %s (%s)",
+                        zone_id, zone_name, leader_device_id, leader_serial
+                    )
+                else:
+                    logger.warning("Zone %s ('%s') has no devices; skipping", zone_id, zone_name)
+                    errors.append({'zone_id': zone_id, 'zone_name': zone_name, 'error': 'No devices in zone'})
+                    continue
+
+            if zone_type == 'HEATING' or heating_enabled is False:
+                # 0 = OFF, 1 = HEAT (when heating_enabled is False always switch to OFF regardless of zone type)
+                char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
+            else:
+                # Zone type can be 'AIR_CONDITIONING' (or other none HEATING) so we need to kwown which mode to return to
+                # get last mode from device_state_history if available, otherwise default to HEAT (0 = OFF, 1 = HEAT, 2 = COOL)
+                char_updates['target_heating_cooling_state'] = tado_api.state_manager.get_last_active_heating_mode(leader_device_id)
+
+            # Apply optimistic state for immediate UI feedback
+            tado_api.state_manager.set_optimistic_state(
+                leader_device_id,
+                {'target_heating_cooling_state': char_updates['target_heating_cooling_state']}
+            )
+
+            try:
+                await tado_api.set_device_characteristics(leader_device_id, char_updates)
+                mode = MODE_LABELS.get(char_updates['target_heating_cooling_state'], f"UNKNOWN({char_updates['target_heating_cooling_state']})")
+                logger.info("Zone %s (%s): heating mode=%s via local bridge", zone_id, zone_name, mode)
+                results.append({
+                    'success': True,
+                    'zone_id': zone_id,
+                    'zone_name': zone_name,
+                    'leader_device_id': leader_device_id,
+                    'leader_serial': leader_serial,
+                    'mode': mode,
+                    'applied': {'target_temperature': None, 'heating_enabled': heating_enabled}
+                })
+            except Exception as e:
+                logger.error("Failed to control zone %s (%s): %s", zone_id, zone_name, e)
+                errors.append({'zone_id': zone_id, 'zone_name': zone_name, 'error': str(e)})
+        conn.close()
+
+        return {
+            'success': len(errors) == 0,
+            'count': len(results),
+            'error_count': len(errors),
+            'handling': 'local_handling',
+            'applied': {
+                'target_temperature': None,
+                'heating_enabled': heating_enabled
+            },
+            'zones': results,
+            'errors': errors
         }
 
     @app.get("/zones/{zone_id}", tags=["Zones"])
@@ -635,6 +827,7 @@ def register_routes(app: FastAPI, get_tado_api):
         order_id = zone_info['order_id']
         leader_serial = zone_info['leader_serial']
         leader_type = zone_info['leader_type']
+        zone_type = zone_info['zone_type']
         is_circuit_driver = zone_info['is_circuit_driver']
         tado_zone_id = zone_info['tado_zone_id']
         window_open_time = zone_info['window_open_time']
@@ -728,6 +921,7 @@ def register_routes(app: FastAPI, get_tado_api):
             'leader_device_id': leader_device_id,
             'leader_serial': leader_serial,
             'leader_type': leader_type,
+            'zone_type': zone_type,
             'tado_zone_id': tado_zone_id,
             'is_circuit_driver': bool(is_circuit_driver),
             'order_id': order_id,
@@ -835,6 +1029,8 @@ def register_routes(app: FastAPI, get_tado_api):
                 temperature: Optional[float] = None,
                 heating_enabled: Optional[bool] = None,
                 no_implicit_mode: Optional[bool] = False,
+                heating_mode: Optional[int] = None,
+                persistant: Optional[bool] = False,
                 api_key: Optional[str] = Depends(get_api_key)
              ):
         """
@@ -843,10 +1039,15 @@ def register_routes(app: FastAPI, get_tado_api):
         Args:
             zone_id: Zone ID to control
             temperature: Target temperature in °C (-1, 0, or 5-30).
-                        - -1 = resume schedule/auto mode (enable heating without changing target temp)
+                        - -1 = resume schedule/auto mode (to last know heating mode HEAT/COOL without changing target temp)
                         - 0 = disable heating (without changing target temp)
                         - >= 5 = set temperature and enable heating
-            heating_enabled: Enable/disable heating mode (true/false)
+            heating_enabled: Enable/disable heating mode (true/false) TRUE return to last know heating mode (heat/cool) false turn off heating.
+            heating_mode: 0=OFF, 1=HEAT, 2=COOL (if supported by devices in zone). Overrides heating_enabled if given.
+            no_implicit_mode: If true, disable smart defaults (temperature values won't auto-enable/disable heating)
+            persistant: If true, only valid for temperature=0 or temperature=-1 else ignored. If true, a Cloud API command will be sent to
+                        enable/disable the SMART schedule for unlimited time. This will cost a cloud API call and requires the cloud API to be enabled and authenticated.
+                        If false, a temporary overlay will be applied that will automatically expire according the Tado App setting.
 
         Returns:
             Success status and applied values
@@ -855,18 +1056,18 @@ def register_routes(app: FastAPI, get_tado_api):
             - Smart defaults:
               - temperature = -1 implies heating_enabled=true (resume schedule)
               - temperature = 0 implies heating_enabled=false (off)
-              - temperature >= 5°C implies heating_enabled=true
+              - temperature >= 5°C <= 30°C implies heating_enabled=true
             - Explicitly set heating_enabled to override smart defaults
             - Commands are sent to the zone's leader device
             - The leader propagates changes to other devices as needed
-            - heating_enabled controls the heat mode (OFF=0, HEAT=1)
+            - heating_enabled controls the heat/cool mode (OFF=0, HEAT=1/COOL=2 depending on last active mode)
             - Both temperature=0 and temperature=-1 preserve the stored target temperature
             - This allows temporary on/off control without affecting your schedule
-            - temperature=-1 is useful for automation: turn on without changing schedule
-            - temperature=0 is useful for "away mode": turn off but remember setpoint
+            - temperature=-1 is useful for automation: turn on without changing schedule (with persistant=true to stop temporaryoverlay stop and SMART schedule)
+            - temperature=0 is useful for "away mode": turn off but remember setpoint (with persistant=true to set overlay forever until manually turned back on)
         """
         # Log the incoming request
-        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled}")
+        logger.info(f"POST /zones/{zone_id}/set temperature={temperature} heating_enabled={heating_enabled} heating_mode={heating_mode} no_implicit_mode={no_implicit_mode} persistant={persistant}")
 
         tado_api = get_tado_api()
         if not tado_api:
@@ -875,26 +1076,42 @@ def register_routes(app: FastAPI, get_tado_api):
         if not tado_api.pairing:
             raise HTTPException(status_code=503, detail="Bridge not connected")
 
-        # Apply smart defaults
-        if temperature is not None and heating_enabled is None:
-            if temperature == -1:
-                heating_enabled = True  # Resume schedule/enable without changing temp
-                temperature = None  # Don't set temperature
-            elif temperature == 0:
-                heating_enabled = False
-                temperature = None  # Don't set temperature
-            elif temperature >= 5.0 and no_implicit_mode is not True:
-                heating_enabled = True
-        elif temperature == -1:
-            # temperature=-1 always means "don't change temperature, just enable"
-            temperature = None
-            if heating_enabled is None:
-                heating_enabled = True
+        # Validate temperature range first
+        if temperature is not None:
+            if temperature < -1.0 or temperature > 30.0:
+                raise HTTPException(status_code=400, detail="Temperature must be -1 (resume), 0 (off), or between 5 and 30°C")
+            if temperature > 0 and temperature < 5.0:
+                raise HTTPException(status_code=400, detail="Temperature must be -1, 0, or between 5 and 30°C")
+
+        if temperature is None and heating_enabled is None and heating_mode is None:
+            raise HTTPException(status_code=400, detail="At least the temp or heating mode should be given")
+
+        resolved_temperature = temperature
+        if heating_mode is None:
+            resolved_heating_enabled = heating_enabled
+        else:
+            resolved_heating_enabled = None
+
+        if temperature == -1:
+            if heating_enabled is False or heating_mode == 0:
+                raise HTTPException(status_code=400, detail="Can not switch on and off heating with one call")
+            resolved_temperature = None
+            if heating_mode is None:
+                resolved_heating_enabled = True
+        elif temperature == 0:
+            if heating_enabled is True or heating_mode in (1, 2):
+                raise HTTPException(status_code=400, detail="Can not switch on and off heating with one call")
+            resolved_temperature = None
+            if heating_mode is None:
+                resolved_heating_enabled = False
+        elif temperature is not None and temperature >= 5.0:
+            if heating_enabled is None and heating_mode is None and no_implicit_mode is False:
+                resolved_heating_enabled = True
 
         # Get zone info
         conn = sqlite3.connect(tado_api.state_manager.db_path)
         cursor = conn.execute("""
-            SELECT z.name, z.leader_device_id, d.serial_number
+            SELECT z.name, z.leader_device_id, d.serial_number, z.tado_zone_id, z.zone_type
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             WHERE z.zone_id = ?
@@ -905,7 +1122,7 @@ def register_routes(app: FastAPI, get_tado_api):
         if not row:
             raise HTTPException(status_code=404, detail=f"Zone {zone_id} not found")
 
-        zone_name, leader_device_id, leader_serial = row
+        zone_name, leader_device_id, leader_serial, tado_zone_id, zone_type = row
 
         if not leader_device_id:
             # No explicit leader assigned - fall back to the first device in the zone
@@ -933,33 +1150,93 @@ def register_routes(app: FastAPI, get_tado_api):
             else:
                 raise HTTPException(status_code=400, detail=f"Zone '{zone_name}' has no leader device assigned")
 
+        # Persistent handling only applies to on/off mode changes without temperature updates
+        use_cloud_persistant_call = (
+            persistant is True and
+            resolved_temperature is None and
+            resolved_heating_enabled is not None
+        )
+
+        if use_cloud_persistant_call:
+            cloud_api = getattr(tado_api, 'cloud_api', None)
+            if not cloud_api:
+                raise HTTPException(status_code=503, detail="Persistent mode requires cloud API to be enabled")
+            if not cloud_api.is_authenticated():
+                raise HTTPException(status_code=401, detail="Persistent mode requires cloud API authentication")
+            if not tado_zone_id:
+                raise HTTPException(status_code=400, detail="Zone is missing tado_zone_id required for cloud control")
+
+            try:
+                if resolved_heating_enabled:
+                    cloud_result = await cloud_api._switch_zones_to_smartschedule([tado_zone_id])
+                else:
+                    cloud_result = await cloud_api._switch_zones_persistant_off([tado_zone_id])
+
+                if cloud_result is None:
+                    raise HTTPException(status_code=502, detail="Cloud API command failed")
+
+                logger.info(f"Zone {zone_id} ({zone_name}): smart-schedule={resolved_heating_enabled} via Cloud API")
+
+                return {
+                    'success': True,
+                    'zone_id': zone_id,
+                    'zone_name': zone_name,
+                    'leader_device_id': leader_device_id,
+                    'leader_serial': leader_serial,
+                    'handling': 'cloud_call',
+                    'applied': {
+                        'target_temperature': resolved_temperature,
+                        'heating_enabled': resolved_heating_enabled,
+                        'persistant': use_cloud_persistant_call
+                    }
+                }
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed cloud control for zone {zone_id}: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to set persistent cloud control: {str(e)}")
+
         # Build characteristic updates
         char_updates = {}
 
-        if temperature is not None:
-            # Validate temperature range (5-30°C is typical for Tado)
-            if temperature < 0.0 or temperature > 30.0:
-                raise HTTPException(status_code=400, detail="Temperature must be -1 (resume), 0 (off), or between 5 and 30°C")
-            if temperature > 0 and temperature < 5.0:
-                raise HTTPException(status_code=400, detail="Temperature must be -1, 0, or between 5 and 30°C")
+        if resolved_temperature is not None:
+            char_updates['target_temperature'] = resolved_temperature
 
-            if temperature > 0:  # Only set if not turning off
-                char_updates['target_temperature'] = temperature
-
-        if heating_enabled is not None:
-            # 0 = OFF, 1 = HEAT
-            char_updates['target_heating_cooling_state'] = 1 if heating_enabled else 0
+        if heating_mode is not None:
+            # heating_mode overrides heating_enabled if given
+            if zone_type == 'HEATING':
+                if heating_mode in (0, 1):
+                    char_updates['target_heating_cooling_state'] = heating_mode
+                else:
+                    raise HTTPException(status_code=400, detail="Invalid heating_mode value. Must be 0 (OFF) or 1 (HEAT)")
+            elif heating_mode in (0, 1, 2):
+                char_updates['target_heating_cooling_state'] = heating_mode
+            else:
+                raise HTTPException(status_code=400, detail="Invalid heating_mode value. Must be 0 (OFF), 1 (HEAT) or 2 (COOL)")
+        else:
+            if resolved_heating_enabled is not None:
+                if zone_type == 'HEATING' or resolved_heating_enabled is False:
+                    # 0 = OFF, 1 = HEAT, when resolved_heating_enabled is False always switch to OFF regardless of zone type
+                    char_updates['target_heating_cooling_state'] = 1 if resolved_heating_enabled else 0
+                else:
+                    # Zone type can be 'AIR_CONDITIONING' (other none HEATING) so when need to kwown which mode to return to
+                    # get last mode from device_state_history if available, otherwise default to HEAT (0 = OFF, 1 = HEAT, 2 = COOL)
+                    char_updates['target_heating_cooling_state'] = tado_api.state_manager.get_last_active_heating_mode(leader_device_id)
 
         if not char_updates:
             raise HTTPException(status_code=400, detail="No control parameters provided")
 
         # Log what we're changing (single summary line)
         changes = []
+        resolved_mode = None
         if 'target_temperature' in char_updates:
             changes.append(f"temperature={char_updates['target_temperature']}°C")
         if 'target_heating_cooling_state' in char_updates:
-            mode = "ON" if char_updates['target_heating_cooling_state'] == 1 else "OFF"
-            changes.append(f"heating={mode}")
+            resolved_mode = MODE_LABELS.get(
+                char_updates['target_heating_cooling_state'],
+                f"UNKNOWN({char_updates['target_heating_cooling_state']})"
+            )
+            changes.append(f"mode={resolved_mode}")
         logger.info(f"Zone {zone_id} ({zone_name}): {', '.join(changes)}")
 
         # Apply optimistic state prediction for immediate UI feedback
@@ -987,8 +1264,10 @@ def register_routes(app: FastAPI, get_tado_api):
                 'leader_device_id': leader_device_id,
                 'leader_serial': leader_serial,
                 'applied': {
-                    'target_temperature': temperature,
-                    'heating_enabled': heating_enabled
+                    'target_temperature': resolved_temperature,
+                    'heating_enabled': resolved_heating_enabled,
+                    'heating_mode': resolved_mode,
+                    'persistant': use_cloud_persistant_call
                 }
             }
 
@@ -1093,6 +1372,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'zone_name': device_info.get('zone_name'),
                 'device_type': device_info.get('device_type'),
                 'model': device_info.get('model'),
+                'name': device_info.get('name'),
                 'firmware_version': device_info.get('firmware_version'),
                 'is_zone_leader': device_info.get('is_zone_leader'),
                 'is_circuit_driver': device_info.get('is_circuit_driver'),
@@ -1103,7 +1383,7 @@ def register_routes(app: FastAPI, get_tado_api):
                     'target_temp_c': target_temp_c,
                     'target_temp_f': round(target_temp_c * 9/5 + 32, 1) if target_temp_c is not None else None,
                     'mode': state.get('target_heating_cooling_state', 0),
-                    'cur_heating': 1 if state.get('current_heating_cooling_state') == 1 else 0,
+                    'cur_heating': state.get('current_heating_cooling_state'),
                     'valve_position': state.get('valve_position'),
                     'battery_low': battery_low,
                 }
@@ -1152,6 +1432,7 @@ def register_routes(app: FastAPI, get_tado_api):
             'zone_name': device_info.get('zone_name'),
             'device_type': device_info.get('device_type'),
             'model': device_info.get('model'),
+            'name': device_info.get('name'),
             'firmware_version': device_info.get('firmware_version'),
             'is_zone_leader': device_info.get('is_zone_leader'),
             'is_circuit_driver': device_info.get('is_circuit_driver'),
@@ -1162,7 +1443,7 @@ def register_routes(app: FastAPI, get_tado_api):
                 'target_temp_c': target_temp_c,
                 'target_temp_f': round(target_temp_c * 9/5 + 32, 1) if target_temp_c is not None else None,
                 'mode': state.get('target_heating_cooling_state', 0),
-                'cur_heating': 1 if state.get('current_heating_cooling_state') == 1 else 0,
+                'cur_heating': state.get('current_heating_cooling_state'),
                 'valve_position': state.get('valve_position'),
                 'battery_low': battery_low,
             }
@@ -1501,7 +1782,7 @@ def register_routes(app: FastAPI, get_tado_api):
 
         State Field Reference:
             mode: 0=Off, 1=Heat, 2=Cool, 3=Auto (TargetHeatingCoolingState)
-            cur_heating: 0=not heating, 1=actively heating (CurrentHeatingCoolingState)
+            cur_heating: 0=not heating, 1=actively heating 2=actively cooling (CurrentHeatingCoolingState)
             battery_low: true if Cloud API battery_state != "NORMAL" (cached, no DB queries)
             Temperatures provided in both Celsius (_c) and Fahrenheit (_f)
 
@@ -1793,5 +2074,34 @@ def register_routes(app: FastAPI, get_tado_api):
         except Exception as e:
             logger.error(f"Error refreshing cloud data: {e}")
             raise HTTPException(status_code=500, detail=f"Failed to refresh cloud data: {str(e)}")
+
+    @app.get("/purgehistory/info", tags=["Admin"])
+    async def get_history_status(api_key: Optional[str] = Depends(get_api_key)):
+        """Get history records status, number of records, files size and oldest record."""
+
+        tado_api = get_tado_api()
+        return tado_api.state_manager.get_device_history_status_info(tado_api.cloud_api.purge_history_days)
+
+    @app.post("/purgehistory/now", tags=["Admin"])
+    async def purge_history_data(
+        days: Optional[int] = None,
+        api_key: Optional[str] = Depends(get_api_key)
+    ):
+        """Manually clean database from old history records."""
+
+        tado_api = get_tado_api()
+        if days is None:
+            if tado_api.cloud_api.purge_history_days is not None:
+                days = tado_api.cloud_api.purge_history_days
+            else:
+                days = 365  # Default to keeping 1 year of history OR from command line argument
+
+        if not isinstance(days, int):
+            raise HTTPException(status_code=400, detail="Days must be an integer")
+
+        if days < 7:
+            raise HTTPException(status_code=400, detail="Days must be greater than or equal to 7")
+
+        return tado_api.state_manager.purge_device_history(days)
 
     return app

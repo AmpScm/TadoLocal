@@ -52,9 +52,10 @@ def state_manager_with_db_devices(temp_db):
     conn.execute("""
         INSERT INTO devices (device_id, serial_number, aid, device_type, name, model, manufacturer, zone_id, is_zone_leader)
         VALUES
-            (1, 'RU0208A26ABC123', 221, 'thermostat', 'Living Room Thermostat', 'Smart Thermostat', 'Tado', 1, 1),
-            (2, 'VA0210A26ABC456', 222, 'radiator_valve', 'Bedroom Radiator Valve', 'Smart Radiator Valve', 'Tado', 2, 0),
-            (3, 'IB01170626ABC789', 223, 'internet_bridge', 'Internet Bridge', 'Internet Bridge', 'Tado', NULL, 0)
+            (1, 'RU0208A26ABC123', 221, 'thermostat', 'Living Room Thermostat', 'RU02', 'Tado', 1, 1),
+            (2, 'VA0210A26ABC456', 222, 'radiator_valve', 'Bedroom Radiator Valve', 'VA02', 'Tado', 2, 0),
+            (3, 'IB01170626ABC789', 223, 'internet_bridge', 'Internet Bridge', 'IB01', 'Tado', NULL, 0),
+            (4, 'WR123456789', 224, 'smart_ac_control', 'Smart AC Control WR123456789', 'AC02', 'Tado', 3, 1)
     """)
 
     # Insert mock zones
@@ -62,7 +63,8 @@ def state_manager_with_db_devices(temp_db):
         INSERT INTO zones (zone_id, name, leader_device_id, order_id, tado_zone_id)
         VALUES
             (1, 'Living Room', 1, 1, 1),
-            (2, 'Bedroom', 2, 2, 2)
+            (2, 'Bedroom', 2, 2, 2),
+            (3, 'Occide', 3, 3, 3)
     """)
 
     # Seed history records (sample database) - 61 seconds apart
@@ -82,6 +84,7 @@ def state_manager_with_db_devices(temp_db):
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
+            (?, ?, ?, ?, ?, ?, ?, ?, ?, ?),
             (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (
         1, bucket_0, 20.0, 21.0, 1, 1, 48, 0, None, bucket_0,
@@ -89,12 +92,13 @@ def state_manager_with_db_devices(temp_db):
         1, bucket_2, 23.5, 21.0, 1, 1, 55, 0, None, bucket_2, # latest for device 2
         2, bucket_2, 19.0, 20.0, 0, 0, 55, 1, float(base_ts), bucket_2,
         3, bucket_0, None, None, None, None, None, None, None, bucket_0,
+        4, bucket_1, 19.5, 22.0, 0, 0, 35, 2, float(base_ts), bucket_1,
     ))
 
      # Update devices with zone relationships
     conn.execute("UPDATE devices SET zone_id = 1 WHERE device_id = 1")
     conn.execute("UPDATE devices SET zone_id = 2 WHERE device_id = 2")
-
+    conn.execute("UPDATE devices SET zone_id = 3 WHERE device_id = 4")
 
     conn.commit()
     conn.close()
@@ -119,6 +123,7 @@ class TestGetDeviceInfo:
         result = state_manager_with_db_devices.get_device_info(2)
 
         assert result['device_type'] == 'radiator_valve'
+        assert result['zone_id'] == 2
         assert result['serial_number'] == 'VA0210A26ABC456'
 
     def test_get_device_info_internet_bridge(self, state_manager_with_db_devices):
@@ -128,6 +133,14 @@ class TestGetDeviceInfo:
         assert result['device_type'] == 'internet_bridge'
         assert result['zone_id'] is None
         assert result['is_zone_leader'] is False
+
+    def test_get_device_info_smart_ac_control(self, state_manager_with_db_devices):
+        """Test retrieving internet bridge device info."""
+        result = state_manager_with_db_devices.get_device_info(4)
+
+        assert result['device_type'] == 'smart_ac_control'
+        assert result['zone_id'] == 3
+        assert result['is_zone_leader'] is True
 
     def test_get_device_info_returns_empty_dict_for_unknown_device(self, state_manager):
         """Test that unknown device IDs return empty dict."""
@@ -176,6 +189,7 @@ class TestDeviceInfoCacheFromDatabase:
         assert state_manager_with_db_devices.get_device_id_by_aid(221) == 1
         assert state_manager_with_db_devices.get_device_id_by_aid(222) == 2
         assert state_manager_with_db_devices.get_device_id_by_aid(223) == 3
+        assert state_manager_with_db_devices.get_device_id_by_aid(224) == 4
 
     def test_zone_info_in_device_cache(self, state_manager_with_db_devices):
         """Test that zone information is loaded into device cache."""
@@ -198,7 +212,7 @@ class TestGetAllDevices:
         """Test retrieving all devices with database data."""
         devices = state_manager_with_db_devices.get_all_devices()
 
-        assert len(devices) >= 3
+        assert len(devices) == 4
 
         # Verify device 1
         device_1 = next((d for d in devices if d['device_id'] == 1), None)
@@ -215,6 +229,11 @@ class TestGetAllDevices:
         device_3 = next((d for d in devices if d['device_id'] == 3), None)
         assert device_3 is not None
         assert device_3['device_type'] == 'internet_bridge'
+
+        # Verify device 4
+        device_4 = next((d for d in devices if d['device_id'] == 4), None)
+        assert device_4 is not None
+        assert device_4['device_type'] == 'smart_ac_control'
 
     def test_get_all_devices_has_zone_names(self, state_manager_with_db_devices):
         """Test that all devices include zone information."""
@@ -857,8 +876,8 @@ class TestGetOrCreateDevice:
                 {
                     "type": "0000003e-0000-1000-8000-0026bb765291",  # AccessoryInformation
                     "characteristics": [
-                        {"type": "00000023-0000-1000-8000-0026bb765291", "value": "Living Room Thermostat"},
-                        {"type": "00000021-0000-1000-8000-0026bb765291", "value": "Smart Thermostat X"},
+                        {"type": "00000023-0000-1000-8000-0026bb765291", "value": "tado Smart Radiator Thermostat VA12345"},
+                        {"type": "00000021-0000-1000-8000-0026bb765291", "value": "SRT01"},
                         {"type": "00000020-0000-1000-8000-0026bb765291", "value": "Tado"},
 
                     ],
@@ -880,7 +899,7 @@ class TestGetOrCreateDevice:
         info = state_manager.get_device_info(device_id)
         assert info["serial_number"] == "RU9999TEST123"
         assert info["aid"] == 555
-        assert info["name"] == "Living Room Thermostat"
+        assert info["name"] == "tado Smart Radiator Thermostat VA12345"
         assert info["device_type"] == "thermostat"
 
         conn = sqlite3.connect(state_manager.db_path)
@@ -890,7 +909,50 @@ class TestGetOrCreateDevice:
         ).fetchone()
         conn.close()
 
-        assert row == ("RU9999TEST123", 555, "thermostat", "Living Room Thermostat", "Smart Thermostat X", "Tado")
+        assert row == ("RU9999TEST123", 555, "thermostat", "tado Smart Radiator Thermostat VA12345", "SRT01", "Tado")
+
+    def test_creates_new_device_from_accessory_data_ac(self, state_manager):
+        """Creates a new device and parses name/model/manufacturer/type."""
+        accessory_data = {
+            "services": [
+                {
+                    "type": "0000003e-0000-1000-8000-0026bb765291",  # AccessoryInformation
+                    "characteristics": [
+                        {"type": "00000023-0000-1000-8000-0026bb765291", "value": "Smart AC Control WR123456"},
+                        {"type": "00000021-0000-1000-8000-0026bb765291", "value": "AC02"},
+                        {"type": "00000020-0000-1000-8000-0026bb765291", "value": "Tado"},
+
+                    ],
+                },
+                {
+                    "type": "0000004a-0000-1000-8000-0026bb765291",  # Thermostat service
+                    "characteristics": [],
+                },
+            ]
+        }
+
+        device_id = state_manager.get_or_create_device("WR9999TEST123", 555, accessory_data)
+
+        assert isinstance(device_id, int)
+        assert device_id > 0
+        assert state_manager.device_id_cache["WR9999TEST123"] == device_id
+        assert state_manager.get_device_id_by_aid(555) == device_id
+
+        info = state_manager.get_device_info(device_id)
+        assert info["serial_number"] == "WR9999TEST123"
+        assert info["aid"] == 555
+        assert info["name"] == "Smart AC Control WR123456"
+        assert info["device_type"] == "smart_ac_control"
+
+        conn = sqlite3.connect(state_manager.db_path)
+        row = conn.execute(
+            "SELECT serial_number, aid, device_type, name, model, manufacturer FROM devices WHERE device_id = ?",
+            (device_id,)
+        ).fetchone()
+        conn.close()
+
+        assert row == ("WR9999TEST123", 555, "smart_ac_control", "Smart AC Control WR123456", "AC02", "Tado")
+
 
     def test_detects_device_type_from_serial_prefix_when_service_unknown(self, state_manager):
         """Falls back to serial prefix mapping when no known service type."""
@@ -902,6 +964,17 @@ class TestGetOrCreateDevice:
 
         info = state_manager.get_device_info(device_id)
         assert info["device_type"] == "radiator_valve"
+
+    def test_detects_device_type_from_serial_prefix_when_service_ac(self, state_manager):
+        """Falls back to serial prefix mapping when no known service type."""
+        device_id = state_manager.get_or_create_device(
+            "SU0210A26XYZ999",
+            777,
+            {"services": []},
+        )
+
+        info = state_manager.get_device_info(device_id)
+        assert info["device_type"] == "smart_ac_control"
 
     def test_does_not_add_aid_mapping_when_aid_is_falsy(self, state_manager):
         """When aid is 0/None, aid_to_device_id should not be populated."""
@@ -1305,6 +1378,5 @@ class TestUpdateDeviceWindowStatusAdditional:
         with patch.object(state_manager, "_save_to_history") as mock_save:
             state_manager.update_device_window_status(99, 0)
 
-        print(state_manager.current_state)
-        assert state_manager.current_state[99]["window"] ==0
+        assert state_manager.current_state[99]["window"] == 0
         mock_save.assert_called_once()

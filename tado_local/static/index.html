@@ -33,6 +33,10 @@
             --card-medium-end: #ff9642;
             --card-hot-start: #f44336;
             --card-hot-end: #e53935;
+            --card-freeze-start: #b6c6fc;
+            --card-freeze-end: #96afff;
+            --card-cooling-start: #5278eb;
+            --card-cooling-end: #1d53f5;
             --btn-secondary-bg: #e0e0e0;
             --btn-secondary-bg-hover: #d0d0d0;
             --btn-secondary-text: #666;
@@ -77,6 +81,10 @@
             --card-cold-end: #2e7d32;
             --card-medium-start: #e69540;
             --card-medium-end: #cc7a2a;
+            --card-freeze-start: #b6c6fc;
+            --card-freeze-end: #96afff;
+            --card-cooling-start: #5278eb;
+            --card-cooling-end: #1d53f5;
             --card-hot-start: #d32f2f;
             --card-hot-end: #c62828;
             --btn-secondary-bg: #444;
@@ -126,6 +134,10 @@
                 --card-medium-end: #cc7a2a;
                 --card-hot-start: #d32f2f;
                 --card-hot-end: #c62828;
+                --card-freeze-start: #b6c6fc;
+                --card-freeze-end: #96afff;
+                --card-cooling-start: #5278eb;
+                --card-cooling-end: #1d53f5;
                 --btn-secondary-bg: #444;
                 --btn-secondary-bg-hover: #555;
                 --btn-secondary-text: #ccc;
@@ -167,13 +179,110 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 30px;
+            margin-bottom: 15px;
+            flex-wrap: nowrap;
+        }
+
+        .header-left,
+        .header-center,
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .header-center {
+            flex: 1;
+            justify-content: center;
+        }
+
+        .header-left {
+            flex: 1;
+        }
+
+        .header-right {
+            flex: 1;
+            justify-content: flex-end;
+        }
+
+        .schedule-button {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 16px 4px 12px;
+            background: var(--bg-primary);
+            border-radius: 8px;
+
+            border: 2px solid var(--border-color);
+            transition: transform 0.6s cubic-bezier(.25,.8,.25,1);
+            cursor: pointer;
+        }
+
+        .schedule-button h4 {
+            color: var(--text-primary);
+            white-space: nowrap;       
+            font-weight: normal;     
+        }
+        
+        .schedule-button div {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.1;
+        }
+
+        .schedule-button:hover {
+            border: none;
+            background-color: var(--bg-accent-subtle);
+            transform: scale(1.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .schedule-warning {
+            font-size: 9px;
+            opacity: 0.8;
+            color: var(--text-secondary);
+        }
+
+        @media (max-width: 900px) and (min-width: 650px) {
+            .schedule-button div,
+            .schedule-button-label {
+                display: none; 
+            }
+        }
+
+        @media (max-width: 650px) {
+            .header {
+                flex-wrap: wrap;
+            }
+
+            .header-left {
+                order: 1;
+                flex: 1;
+            }
+
+            .header-right {
+                order: 2;
+                flex: 0;
+                display: flex;
+                gap: 8px;
+            }
+
+            .header-center {
+                order: 3;
+                flex: 1 1 100%;       
+                gap: 30px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                margin-top: 12px;
+            }
         }
 
         h1 {
             color: var(--text-primary);
             font-weight: 400;
             width: 100%;
+            white-space: nowrap;
         }
 
         .theme-toggle {
@@ -184,11 +293,13 @@
             cursor: pointer;
             font-size: 18px;
             line-height: 1;
-            transition: border-color 0.2s;
+            transition: border-color 0.4s;
         }
 
         .theme-toggle:hover {
             border-color: var(--accent);
+            transform: translateY(1.5px) translateX(1.5px) scale(0.94);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
         }
 
         .zones-grid {
@@ -228,6 +339,16 @@
 
         .zone-card.heating-hot {
             background: linear-gradient(135deg, var(--card-hot-start) 0%, var(--card-hot-end) 100%);
+            color: var(--text-on-accent);
+        }
+
+        .zone-card.cooling-medium {
+            background: linear-gradient(135deg, var(--card-cooling-start) 0%, var(--card-cooling-end) 100%);
+            color: var(--text-on-accent);
+        }
+
+        .zone-card.cooling-freeze {
+            background: linear-gradient(135deg, var(--card-freeze-start) 0%, var(--card-freeze-end) 100%);
             color: var(--text-on-accent);
         }
 
@@ -299,12 +420,15 @@
             padding: 6px 10px;
             cursor: pointer;
             line-height: 1;
-            transition: border-color 0.2s;
+            transition: border-color 0.4s; 
         }
 
         .window-toggle:hover {
             border-color: var(--accent);
+            transform: translateY(1.5px) translateX(1.5px) scale(0.94);
+            box-shadow: 0 1px 2px rgba(0,0,0,0.15);
         }
+
         .window-icon {
             height: 30px;
         }
@@ -354,7 +478,7 @@
         }
 
         .modal-header {
-            margin-bottom: 20px;
+            margin-bottom: 10px;
         }
 
         .modal-title {
@@ -370,7 +494,7 @@
         }
 
         .control-group {
-            margin-bottom: 25px;
+            margin-bottom: 5px;
         }
 
         .control-label {
@@ -414,8 +538,7 @@
         }
 
         .mode-buttons {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
+            display: flex;
             gap: 10px;
         }
 
@@ -428,6 +551,7 @@
             cursor: pointer;
             font-size: 14px;
             transition: all 0.2s;
+            flex: 1;
         }
 
         .mode-button:hover {
@@ -444,7 +568,7 @@
         .action-buttons {
             display: flex;
             gap: 10px;
-            margin-top: 25px;
+            margin-top: 15px;
         }
 
         .btn {
@@ -563,7 +687,7 @@
             display: flex;
             gap: 0;
             border-bottom: 2px solid var(--border-light);
-            margin: 20px 0;
+            margin: 0 0 20px 0;
         }
 
         .tab-button {
@@ -627,7 +751,7 @@
             margin-bottom: 20px;
         }
     </style>
-    <svg aria-hidden="true" id="svgdefs" version="2" xmlns="http://www.w3.org/2000/svg">
+    <svg aria-hidden="true" style="display:none;" id="svgdefs" version="2" xmlns="http://www.w3.org/2000/svg">
         <defs>
             <symbol id="window-open" viewBox="0 0 64 64" fill="none"  stroke="currentColor" stroke-width="2.5" 
                 stroke-linecap="round" stroke-linejoin="round" role="img">
@@ -692,6 +816,60 @@
                 <line x1="4" y1="4" x2="60" y2="56" stroke="var(--text-error)" stroke-width="7" />
                 <line x1="4" y1="56" x2="60" y2="4" stroke="var(--text-error)" stroke-width="7" />
             </symbol>
+            <symbol id="resume-schedule" viewBox="0 0 32 32" fill="none"  stroke="currentColor" stroke-width="0" 
+                stroke-linecap="round" stroke-linejoin="round" role="img">
+                <!-- Calendar frame -->
+                <rect x="4" y="6" width="25" height="22" rx="3" stroke="currentColor" stroke-width="2" fill="none" />
+
+                <!-- Calendar top bar -->
+                <rect x="4" y="6" width="25" height="6" fill="blue" style="fill-opacity:0.4" />
+
+                <!-- Calendar rings -->
+                <line x1="9" y1="4" x2="9" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="14" y1="4" x2="14" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="19" y1="4" x2="19" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="24" y1="4" x2="24" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+
+                <!-- Calendar days -->
+                <rect x="7"    y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.15"/>
+                <rect x="13.5" y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.15"/>
+                <rect x="20"   y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.15"/>
+                <rect x="7"    y="20" width="5.5" height="4" rx="1" fill="blue" opacity="0.15"/>
+                <rect x="13.5" y="20" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.15"/>
+                <rect x="20"   y="20" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.15"/>
+
+                <!-- resume symbol -->
+                <g transform="translate(10,13) scale(0.8)">
+                    <path d="M6 7L7 6L4.70711 3.70711L5.19868 3.21553C5.97697 2.43724 7.03256 2 8.13323 2C11.361 2 14 4.68015 14 7.93274C14 11.2589 11.3013 14 8 14C6.46292 14 4.92913 13.4144 3.75736 12.2426L2.34315 13.6569C3.90505 15.2188 5.95417 16 8 16C12.4307 16 16 12.3385 16 7.93274C16 3.60052 12.4903 0 8.13323 0C6.50213 0 4.93783 0.647954 3.78447 1.80132L3.29289 2.29289L1 0L0 1V7H6Z"
+                        fill="var(--text-primary)"/>
+                </g>
+            </symbol>
+            <symbol id="pause-schedule" viewBox="0 0 32 32" fill="none"  stroke="currentColor" stroke-width="0" 
+                stroke-linecap="round" stroke-linejoin="round" role="img">
+                <!-- Calendar frame -->
+                <rect x="4" y="6" width="25" height="22" rx="3" stroke="currentColor" stroke-width="2" fill="none" />
+
+                <!-- Calendar top bar -->
+                <rect x="4" y="6" width="25" height="6" fill="blue" style="fill-opacity:0.4" />
+
+                <!-- Calendar rings -->
+                <line x1="9" y1="4" x2="9" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="14" y1="4" x2="14" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="19" y1="4" x2="19" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+                <line x1="24" y1="4" x2="24" y2="8" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+
+                <!-- Calendar days -->
+                <rect x="7"    y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.25"/>
+                <rect x="13.5" y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.25"/>
+                <rect x="20"   y="14" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.25"/>
+                <rect x="7"    y="20" width="5.5" height="4" rx="1" fill="red" opacity="0.25"/>
+                <rect x="13.5" y="20" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.25"/>
+                <rect x="20"   y="20" width="5.5" height="4" rx="1" fill="currentColor" opacity="0.25"/>
+
+                <!-- stand-by symbol -->
+                <line x1="16.5" y1="11" x2="16.5" y2="15" stroke="var(--text-primary)" stroke-width="2" stroke-linecap="round" />
+                <path d="M13.5 13 A6.2 6.2 0 1 0 19.5 13" stroke="var(--text-primary)" stroke-width="2" stroke-linecap="round" fill="none" />
+            </symbol>
         </defs>
     </svg>
 
@@ -699,11 +877,33 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1 id="home-name">Tado Local</h1>
-            <button class="window-toggle" id="window-toggle" title="Toggle show open window-status" aria-label="Toggle show open window-status">
-                <svg width="25" height="25" version="2.0" style="color: gray"><use id="window-toggle-icon" href="#window-open" /></svg>
-            </button>
-            <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+            <div class="header-left">
+                <h1 id="home-name">Tado Local</h1>
+            </div>
+            
+            <div class="header-center">
+                <button class="schedule-button" id="schedule-all-off" title="Turn Tado SMART schedule off for all zones, at the cost of 1 API call" aria-label="Turn Tado SMART schedule off for all zones, at the cost of 1 API call">
+                    <svg width="32" height="32" version="2.0" style="color: gray"><use id="schedule-off-icon" href="#pause-schedule" /></svg>
+                    <div class="schedule-button-label">
+                       <h4>Schedule off</h4>
+                       <p class="schedule-warning">WRN: 1 API call</p>
+                    </div>
+                </button>
+                <button class="schedule-button" id="schedule-all-on" title="Resume for all zones to Tado SMART schedule, at the cost of 1 API call" aria-label="Resume for all zones to Tado SMART schedule, at the cost of 1 API call">
+                    <svg width="32" height="32" version="2.0" style="color: gray"><use id="schedule-off-icon" href="#resume-schedule" /></svg>
+                    <div class="schedule-button-label">
+                         <h4>Resume All</h4>
+                         <p class="schedule-warning">WRN: 1 API call</p>
+                       </div>
+                </button>
+            </div>
+
+            <div class="header-right">
+                <button class="window-toggle" id="window-toggle" title="Toggle show open window-status" aria-label="Toggle show open window-status">
+                    <svg width="25" height="25" version="2.0" style="color: gray"><use id="window-toggle-icon" href="#window-open" /></svg>
+                </button>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle dark mode" aria-label="Toggle dark mode">🌙</button>
+            </div>  
         </div>
         
         <div class="status-bar" id="status-bar" style="display: none;">
@@ -762,9 +962,18 @@
                 </div>
 
                 <div class="control-group">
+                    <label class="control-label">Tado Smart Schedule (WRN: 1 API call)</label>
+                    <div class="mode-buttons">
+                        <button class="mode-button" id="schedule-on" data-mode="off">Resume</button>
+                        <button class="mode-button" id="schedule-off" data-mode="heat">Off</button>
+                    </div>
+                </div>
+                
+                <div class="control-group">
                     <label class="control-label">Mode</label>
                     <div class="mode-buttons">
                         <button class="mode-button" id="mode-heat" data-mode="heat">Heat</button>
+                        <button class="mode-button" id="mode-cool" data-mode="cool">Cool</button>
                         <button class="mode-button" id="mode-off" data-mode="off">Off</button>
                     </div>
                 </div>
@@ -1290,14 +1499,14 @@
                     // Mode is on (heating enabled)
                     // Color by actual current temperature regardless of heating status
                     if (temp !== null && temp !== undefined && temp < 17) {
-                        cardClass += ' heating-cold';
+                        cardClass += (mode === 2 ? ' cooling-freeze' : ' heating-cold');
                     } else if (temp !== null && temp !== undefined && temp <= 22) {
-                        cardClass += ' heating-medium';
+                        cardClass += (mode === 2 ? ' cooling-medium' : ' heating-medium');
                     } else if (temp !== null && temp !== undefined) {
-                        cardClass += ' heating-hot';
+                        cardClass += (mode === 2 ? ' cooling-medium' : ' heating-hot');
                     } else {
                         // No temperature data, default to medium
-                        cardClass += ' heating-medium';
+                        cardClass += (mode === 2 ? ' cooling-medium' : ' heating-medium');
                     }
                     
                     // Status text depends on whether actively heating/cooling
@@ -1379,7 +1588,13 @@
             }
             
             tempValue = state.target_temp_c || 20;
-            modeValue = (state.mode === 0) ? 'off' : 'heat';
+            modeValue = (state.mode === 0) ? 'off' : ((state.mode === 2) ? 'cool' : 'heat');
+            const coolButton = document.getElementById('mode-cool');
+            if (currentZone.zone_type === "AIR_CONDITIONING") {
+                coolButton.style.display = 'inline-block';
+            } else {
+                coolButton.style.display = 'none';
+            }
             
             updateTempDisplay();
             updateModeButtons();
@@ -1410,15 +1625,39 @@
 
         function updateModeButtons() {
             document.getElementById('mode-heat').classList.toggle('active', modeValue === 'heat');
+            document.getElementById('mode-cool').classList.toggle('active', modeValue === 'cool');
             document.getElementById('mode-off').classList.toggle('active', modeValue === 'off');
+            document.getElementById('schedule-off').classList.toggle('active', modeValue === 'schedule-off');
+            document.getElementById('schedule-on').classList.toggle('active', modeValue === 'schedule-on');
         }
 
         async function applyChanges() {
             if (!currentZone) return;
 
             const params = new URLSearchParams();
-            params.append('temperature', tempValue);
-            params.append('heating_enabled', modeValue === 'heat' ? 'true' : 'false');
+            switch (modeValue) {
+                case 'schedule-off':
+                    params.append('heating_enabled', 'false');
+                    params.append('persistant', 'true');
+                    break;
+                case 'schedule-on':
+                    params.append('heating_enabled', 'true');
+                    params.append('persistant', 'true');
+                    break;
+                case 'off':
+                    params.append('temperature', tempValue);
+                    params.append('heating_mode', 0);
+                    break;
+                case 'cool':
+                    params.append('temperature', tempValue);
+                    params.append('heating_mode', 2);
+                    break;
+                default:
+                case 'heat':
+                    params.append('temperature', tempValue);
+                    params.append('heating_mode', 1);
+                    break;
+            }
 
             try {
                 const response = await fetch(`/zones/${currentZone.zone_id}/set?${params}`, {
@@ -1438,6 +1677,30 @@
                 showError('Failed to update zone: ' + error.message);
             }
         }
+
+        async function sendSmartScheduleMode(modeOn) {
+            if (!confirm("Are you sure to switch the schedule " + (modeOn ? "ON" : "OFF") +  " for all zones?\nWARNING: this will cost a Cloud API call")) return;
+
+            const params = new URLSearchParams();
+            params.append('heating_enabled', modeOn ? 'true' : 'false' );
+            params.append('persistant', 'true');
+
+            try {
+                const response = await fetch(`/zones/set?${params}`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to switch smart schedule');
+                }
+                // Reload zones after a short delay
+                setTimeout(loadZones, 1000);
+            } catch (error) {
+                showError('Failed to switch smart schedule: ' + error.message);
+            }
+        }
+
 
         function showError(message) {
             const errorDiv = document.getElementById('error-message');
@@ -1566,9 +1829,32 @@
             updateModeButtons();
         });
 
+        document.getElementById('mode-cool').addEventListener('click', () => {
+            modeValue = 'cool';
+            updateModeButtons();
+        });
+
         document.getElementById('mode-off').addEventListener('click', () => {
             modeValue = 'off';
             updateModeButtons();
+        });
+
+        document.getElementById('schedule-off').addEventListener('click', () => {
+            modeValue = 'schedule-off';
+            updateModeButtons();
+        });
+
+        document.getElementById('schedule-on').addEventListener('click', () => {
+            modeValue = 'schedule-on';
+            updateModeButtons();
+        });
+
+        document.getElementById('schedule-all-on').addEventListener('click', () => {
+            sendSmartScheduleMode(true);
+        });
+
+        document.getElementById('schedule-all-off').addEventListener('click', () => {
+            sendSmartScheduleMode(false);
         });
 
         document.getElementById('btn-cancel').addEventListener('click', closeModal);

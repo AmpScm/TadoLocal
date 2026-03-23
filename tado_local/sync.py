@@ -48,6 +48,7 @@ def normalize_device_type(tado_device_type: str) -> str:
         "WR01": "wireless_receiver",
         "WR02": "wireless_receiver",
         "SU02": "smart_ac_control",
+        "AC02": "smart_ac_control",
     }
 
     return type_map.get(tado_device_type.upper(), tado_device_type.lower())
@@ -199,12 +200,12 @@ class TadoCloudSync:
                     existing_device = cursor.fetchone()
 
                     if existing_device:
-                        # Update existing device - don't overwrite name (comes from HomeKit)
+                        # Update existing device - don't overwrite name (comes from HomeKit) and device type (more accurate from HomeKit services)
                         device_id = existing_device[0]
                         cursor.execute(
                             """
                             UPDATE devices
-                            SET tado_zone_id = ?, zone_id = ?, device_type = ?,
+                            SET tado_zone_id = ?, zone_id = ?,
                                 battery_state = ?, firmware_version = ?,
                                 is_zone_leader = ?, is_circuit_driver = ?, is_zone_driver = ?,
                                 duties = ?, last_seen = CURRENT_TIMESTAMP
@@ -213,7 +214,6 @@ class TadoCloudSync:
                             (
                                 tado_zone_id,
                                 zone_id,
-                                device_type,
                                 battery_state,
                                 firmware,
                                 is_leader,
@@ -256,7 +256,6 @@ class TadoCloudSync:
 
                     synced_devices += 1
 
-                    # Update zone leader if this device is the leader
                     # Update zone leader if this device is the leader
                     if is_leader:
                         try:
@@ -387,7 +386,6 @@ class TadoCloudSync:
                 battery_state = device.get('batteryState')
                 firmware = device.get('currentFwVersion')
                 raw_device_type = device.get('deviceType')
-                device_type = normalize_device_type(raw_device_type) if raw_device_type else None
                 zone_info = entry.get('zone') or {}
                 tado_zone_id = zone_info.get('discriminator')
 
@@ -406,11 +404,11 @@ class TadoCloudSync:
                         """
                         UPDATE devices
                         SET battery_state = ?, firmware_version = ?,
-                            device_type = ?, tado_zone_id = ?, model = ?,
+                            tado_zone_id = ?, model = ?,
                             last_seen = CURRENT_TIMESTAMP
                         WHERE serial_number = ?
                     """,
-                        (battery_state, firmware, device_type, tado_zone_id, raw_device_type, serial),
+                        (battery_state, firmware, tado_zone_id, raw_device_type, serial),
                     )
                     updated_count += 1
                 else:

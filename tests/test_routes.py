@@ -2,9 +2,10 @@ import pytest
 import sqlite3
 from pathlib import Path
 import tempfile
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock
 from fastapi.testclient import TestClient
-
+from types import SimpleNamespace
+from tado_local.routes import create_app, register_routes
 from tado_local.database import ensure_schema_and_migrate
 
 @pytest.fixture
@@ -25,11 +26,13 @@ def test_db():
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (100, 1, 'Living Room', 'HEATING', 1, 1, 33, 66)")
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (101, 1, 'Bedroom', 'HOT_WATER', 2, 2, 10, 25)")
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (102, 1, 'Kitchen', 'HEATING', NULL, 3, 20, 30)")
+    cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (103, 1, 'Office', 'AIR_CONDITIONING', 5, 4, 20, 30)")
 
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN001', 1, 1, 100, 'thermostat', 'Living Room Thermostat', 'RU01', 'Tado', '1.45', 'NORMAL', 1, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN002', 2, 2, 101, 'bridge', 'Bedroom Bridge', 'RU01', 'Tado', '1.45', 'NORMAL', 1, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN003', 3, 3, 102, 'thermostat', 'Kitchen Thermostat', 'RB01', 'Tado', '2.10', 'LOW', 0, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN004', 4, 1, 100, 'radiator_thermostat', 'Living Room Radiator', 'RV01', 'Tado', '1.20', 'LOW', 0, 0)")
+    cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN005', 5, 4, 100, 'smart_ac_control', 'Smart AC Control WR12345678', 'AC02', 'Tado', '118.8', NULL, 1, 0)")
 
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (1, '20260129100000', 21.5, 20.0, 1, 1, 45, 100, 1)")
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (2, '20260129100500', 19.0, 18.0, 1, 1, 50, 95, 0)")
@@ -37,6 +40,7 @@ def test_db():
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (2, '20260129100700', 19.5, 18.5, 0, 1, 60, 95, 0)")
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (4, '20260129101000', 20.5, 20.0, 1, 0, 45, 60, 1)")
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (2, '20260129110500', 22.0, 21.0, 1, 1, 55, 75, 0)")
+    cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (5, '20260129110500', 22.0, 21.0, 2, 2, 54, 70, 0)")
 
     conn.commit()
 
@@ -426,7 +430,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zones" in data
-        assert len(data["zones"]) == 3
+        assert len(data["zones"]) == 4
 
     def test_get_zones_includes_zone_metadata(self, client, state_manager):
         """Test that zone data includes required metadata."""
@@ -458,6 +462,8 @@ class TestGetZones:
         assert zones[1]["order_id"] == 2
         assert zones[2]["name"] == "Kitchen"
         assert zones[2]["order_id"] == 3
+        assert zones[3]["name"] == "Office"
+        assert zones[3]["order_id"] == 4
         assert zones[2]["home_id"] is None
         assert zones[2]['window_open_time'] == 20
         assert zones[2]['window_rest_time'] == 30
@@ -485,6 +491,7 @@ class TestGetZones:
         assert "Living Room" in zone_names
         assert "Bedroom" in zone_names
         assert "Kitchen" in zone_names
+        assert "Office" in zone_names
 
     def test_get_zones_leader_device_ids(self, client, state_manager):
         """Test that zone leader device IDs are correct from database."""
@@ -509,6 +516,7 @@ class TestGetZones:
         assert zone_tado_ids["Living Room"] == 100
         assert zone_tado_ids["Bedroom"] == 101
         assert zone_tado_ids["Kitchen"] == 102
+        assert zone_tado_ids["Office"] == 103
 
     def test_get_zones_response_is_json(self, client, state_manager):
         """Test that response is valid JSON."""
@@ -730,7 +738,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zone_id" in data
-        assert data["zone_id"] == 4
+        assert data["zone_id"] == 5
         assert "name" in data
         assert data["name"] == "Bathroom"
 
@@ -774,7 +782,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zone_id" in data
-        assert data["zone_id"] == 4
+        assert data["zone_id"] == 5
         assert "name" in data
         assert data["name"] == "Bathroom"
 
@@ -978,6 +986,8 @@ class TestGetThermostats:
         response = client.get("/thermostats/2")
 
         assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Device 2 is not a thermostat"
 
     def test_get_thermostats_response_is_json(self, client, state_manager):
         """Test that response is valid JSON."""
@@ -999,6 +1009,36 @@ class TestGetThermostats:
             assert thermostat["device_id"] is not None
             assert isinstance(thermostat["device_id"], int)
 
+    def test_get_thermostats_history(self, client, state_manager):
+        """Test GET /thermostats/{thermostat_id}/history endpoint."""
+        response = client.get("/thermostats/2/history")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "count" in data
+        assert data["count"] == 3
+
+        assert "device_id" in data
+        assert data["device_id"] == 2
+
+        assert "history" in data
+        assert len(data["history"]) >= 1
+
+        assert "state" in data["history"][0]
+        assert "timestamp" in data["history"][0]
+
+        state = data["history"][0]["state"]
+        assert "cur_temp_c" in state
+        assert "cur_temp_f" in state
+        assert "target_temp_c" in state
+        assert "target_temp_f" in state
+        assert "mode" in state
+        assert "cur_heating" in state
+        assert "hum_perc" in state
+        assert "battery_low" in state
+        assert "valve_position" in state
+
 
 class TestGetDevices:
     """Test suite for GET /devices endpoint."""
@@ -1010,8 +1050,8 @@ class TestGetDevices:
         assert response.status_code == 200
         data = response.json()
         assert "devices" in data
-        assert len(data["devices"]) == 4
-        assert data["count"] == 4
+        assert len(data["devices"]) == 5
+        assert data["count"] == 5
 
     def test_get_devices_includes_device_metadata(self, client, state_manager):
         """Test that device data includes required metadata."""
@@ -1308,6 +1348,134 @@ class TestGetDevices:
 class TestSetZoneBridgeCommands:
     """Test suite for set_zone route bridge command generation."""
 
+    def test_set_zone_missing_inputs_returns_expected_error(self, client, mock_api):
+        """At least one of temperature/heating_enabled must be provided."""
+        response = client.post("/zones/1/set")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "At least the temp or heating mode should be given"
+        mock_api.set_device_characteristics.assert_not_called()
+
+    def test_set_zone_temp_zero_and_heating_true_returns_conflict(self, client, mock_api):
+        """temperature=0 conflicts with heating_enabled=true."""
+        response = client.post("/zones/1/set?temperature=0&heating_enabled=true")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Can not switch on and off heating with one call"
+        mock_api.set_device_characteristics.assert_not_called()
+
+    def test_set_zone_temp_minus_one_and_heating_false_returns_conflict(self, client, mock_api):
+        """temperature=-1 conflicts with heating_enabled=false."""
+        response = client.post("/zones/1/set?temperature=-1&heating_enabled=false")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Can not switch on and off heating with one call"
+        mock_api.set_device_characteristics.assert_not_called()
+
+
+    def test_set_zone_temp_without_implicit_mode_does_not_set_heating(self, client, mock_api):
+        """When no_implicit_mode=true, temperature alone should not auto-set heating."""
+        response = client.post("/zones/1/set?temperature=20&no_implicit_mode=true")
+
+        assert response.status_code == 200
+        call_args = mock_api.set_device_characteristics.call_args
+        chars = call_args[0][1]
+
+        assert 'target_temperature' in chars
+        assert chars['target_temperature'] == 20
+        assert 'target_heating_cooling_state' not in chars
+
+    def test_set_zone_temp_wrong_temperaturer(self, client, mock_api):
+        """When temperature is illegal return 400 no setting change."""
+        response = client.post("/zones/1/set?temperature=4.99")
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Temperature must be -1, 0, or between 5 and 30°C"
+        mock_api.set_device_characteristics.assert_not_called()
+
+        response = client.post("/zones/1/set?temperature=30.1")
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Temperature must be -1 (resume), 0 (off), or between 5 and 30°C"
+        mock_api.set_device_characteristics.assert_not_called()
+
+        response = client.post("/zones/1/set?temperature=-1.1")
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Temperature must be -1 (resume), 0 (off), or between 5 and 30°C"
+        mock_api.set_device_characteristics.assert_not_called()
+
+
+    def test_set_zone_persistant_resume_uses_cloud_call(self, client, mock_api):
+        """temperature=-1 with persistant=true should use cloud API, not bridge write."""
+
+        class FakeCloudApi:
+            def is_authenticated(self):
+                return True
+
+            _switch_zones_to_smartschedule = AsyncMock(return_value={"ok": True})
+            _switch_zones_persistant_off = AsyncMock(return_value={"ok": True})
+
+        mock_api.cloud_api = FakeCloudApi()
+
+        response = client.post("/zones/1/set?temperature=-1&persistant=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["handling"] == "cloud_call"
+        assert data["applied"]["target_temperature"] is None
+        assert data["applied"]["heating_enabled"] is True
+
+        mock_api.set_device_characteristics.assert_not_called()
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_called_once_with([100])
+        mock_api.cloud_api._switch_zones_persistant_off.assert_not_called()
+
+    def test_set_zone_persistant_off_uses_cloud_call(self, client, mock_api):
+        """heating_enabled=false with persistant=true should use cloud API off call."""
+
+        class FakeCloudApi:
+            def is_authenticated(self):
+                return True
+
+            _switch_zones_to_smartschedule = AsyncMock(return_value={"ok": True})
+            _switch_zones_persistant_off = AsyncMock(return_value={"ok": True})
+
+        mock_api.cloud_api = FakeCloudApi()
+
+        response = client.post("/zones/1/set?heating_enabled=false&persistant=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["handling"] == "cloud_call"
+        assert data["applied"]["target_temperature"] is None
+        assert data["applied"]["heating_enabled"] is False
+
+        mock_api.set_device_characteristics.assert_not_called()
+        mock_api.cloud_api._switch_zones_persistant_off.assert_called_once_with([100])
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_not_called()
+
+    def test_set_zone_persistant_with_temperature_still_uses_local_handling(self, client, mock_api):
+        """persistant=true is ignored when a temperature setpoint is provided."""
+
+        class FakeCloudApi:
+            def is_authenticated(self):
+                return True
+
+            _switch_zones_to_smartschedule = AsyncMock(return_value={"ok": True})
+            _switch_zones_persistant_off = AsyncMock(return_value={"ok": True})
+
+        mock_api.cloud_api = FakeCloudApi()
+
+        response = client.post("/zones/1/set?temperature=20&persistant=true")
+
+        assert response.status_code == 200
+        mock_api.set_device_characteristics.assert_called_once()
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_not_called()
+        mock_api.cloud_api._switch_zones_persistant_off.assert_not_called()
+
     def test_set_zone_temperature_calls_bridge(self, client, mock_api):
         """Test that setting zone temperature sends correct command to bridge."""
         response = client.post("/zones/1/set?temperature=22.5")
@@ -1496,6 +1664,282 @@ class TestSetZoneBridgeCommands:
         assert response.status_code == 404
 
         # Verify bridge command was not called
+        mock_api.set_device_characteristics.assert_not_called()
+
+    def test_set_zone_temperature_and_mode(self, client, mock_api):
+        """Test that setting both temperature and heating mode sends both commands."""
+        response = client.post("/zones/1/set?temperature=21&heating_mode=1")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        mock_api.set_device_characteristics.assert_called_once()
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_temperature' in chars
+        assert chars['target_temperature'] == 21
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 1
+
+    def test_set_heating_mode_off(self, client, mock_api):
+        """Test that setting  heating sends commands."""
+        response = client.post("/zones/1/set?heating_mode=0")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        mock_api.set_device_characteristics.assert_called_once()
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_temperature' not in chars
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 0
+
+    def test_set_heating_mode_on_no_temperature(self, client, mock_api):
+        """Test that setting  heating sends commands."""
+        response = client.post("/zones/1/set?heating_mode=1")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        mock_api.set_device_characteristics.assert_called_once()
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_temperature' not in chars
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 1
+
+    def test_set_cool_heating_mode_in_heater_device(self, client, mock_api):
+        """Test that cool mode is not set for heating device."""
+        response = client.post("/zones/1/set?heating_mode=2")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Invalid heating_mode value. Must be 0 (OFF) or 1 (HEAT)"
+
+        # Verify bridge command was not called
+        mock_api.set_device_characteristics.assert_not_called()
+
+    def test_set_heating_mode_on_airco_zone(self, client, mock_api):
+        """Test that setting  heating sends commands."""
+        response = client.post("/zones/4/set?heating_mode=2")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        mock_api.set_device_characteristics.assert_called_once()
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_temperature' not in chars
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 2
+
+    def test_set_airco_mode_return_to_previous(self, client, mock_api, state_manager):
+        """Test that setting mode returns to previous mode."""
+        response = client.post("/zones/4/set?heating_mode=1")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        assert mock_api.set_device_characteristics.call_count == 1
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed, switching to HEAT mode should set heating_cooling_state to 1
+        chars = call_args[0][1]
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 1
+
+        response = client.post("/zones/4/set?heating_mode=0")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called, switching to OFF mode should set heating_cooling_state to 0
+        assert mock_api.set_device_characteristics.call_count == 2
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Update device history with mode = 1, fake HomeKit event update in HEAT mode.
+        conn = sqlite3.connect(state_manager.db_path)
+        conn.execute(
+            "INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) " \
+            "VALUES (5, '20260229110500', 22.0, 21.0, 1, 1, 54, 70, 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 0
+
+        response = client.post("/zones/4/set?heating_enabled=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        assert mock_api.set_device_characteristics.call_count == 3
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed. switching back to resume schedule should return to previous mode, which is HEAT (1)
+        chars = call_args[0][1]
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 1
+
+    def test_set_airco_mode_return_to_previous_when_temp_set(self, client, mock_api, state_manager):
+        """Test that setting mode returns to previous mode."""
+
+        response = client.post("/zones/4/set?heating_mode=2")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        assert mock_api.set_device_characteristics.call_count == 1
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 2
+
+        # Update device history with mode = 2, fake HomeKit event update in COOL mode.
+        conn = sqlite3.connect(state_manager.db_path)
+        conn.execute(
+            "INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) " \
+            "VALUES (5, '20260229110500', 19.0, 18.0, 2, 2, 54, 70, 0)"
+        )
+        conn.commit()
+        conn.close()
+
+        response = client.post("/zones/4/set?temperature=22")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # Verify bridge command was called
+        assert mock_api.set_device_characteristics.call_count == 2
+        call_args = mock_api.set_device_characteristics.call_args
+
+        # Check characteristics passed
+        chars = call_args[0][1]
+        assert 'target_temperature' in chars
+        assert chars['target_temperature'] == 22
+        assert 'target_heating_cooling_state' in chars
+        assert chars['target_heating_cooling_state'] == 2
+
+    def test_set_airco_invalid_mode(self, client):
+        """Test that setting ivalid mode returns ."""
+        response = client.post("/zones/4/set?heating_mode=3")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Invalid heating_mode value. Must be 0 (OFF), 1 (HEAT) or 2 (COOL)"
+
+class TestSetAllZonesBridgeCommands:
+    """Test suite for bulk all-zones control."""
+
+    def test_set_all_zones_local_handling_calls_bridge_for_each_zone(self, client, mock_api):
+        """Bulk local all-zones control should forward one bridge write per zone."""
+        response = client.post("/zones/set?heating_enabled=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["count"] == 4
+        assert data["handling"] == "local_handling"
+        assert data["applied"]["heating_enabled"] is True
+
+        assert mock_api.set_device_characteristics.await_count == 4
+        called_device_ids = [call.args[0] for call in mock_api.set_device_characteristics.await_args_list]
+        assert called_device_ids == [1, 2, 3, 5]
+
+        assert data["error_count"] == 0
+        assert data["errors"] == []
+
+        assert len(data["zones"]) == 4
+        assert data["zones"][0]["mode"] == "HEAT"
+        assert data["zones"][1]["mode"] == "HEAT"
+        assert data["zones"][2]["mode"] == "HEAT"
+        assert data["zones"][3]["mode"] == "COOL"
+
+
+    def test_set_all_zones_persistant_true_uses_single_cloud_call(self, client, mock_api):
+        """Bulk persistent all-zones control should use one cloud API call."""
+
+        class FakeCloudApi:
+            def is_authenticated(self):
+                return True
+
+            _switch_zones_to_smartschedule = AsyncMock(return_value={"ok": True})
+            _switch_zones_persistant_off = AsyncMock(return_value={"ok": True})
+
+        mock_api.cloud_api = FakeCloudApi()
+
+        response = client.post("/zones/set?heating_enabled=true&persistant=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["count"] == 4
+        assert data["handling"] == "cloud_call"
+        assert data["applied"]["target_temperature"] is None
+        assert data["applied"]["heating_enabled"] is True
+
+        mock_api.set_device_characteristics.assert_not_called()
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_called_once_with([100, 101, 102, 103])
+        mock_api.cloud_api._switch_zones_persistant_off.assert_not_called()
+
+    def test_set_all_zones_persistant_false_uses_single_cloud_call(self, client, mock_api):
+        """Bulk persistent off should use the cloud off helper."""
+
+        class FakeCloudApi:
+            def is_authenticated(self):
+                return True
+
+            _switch_zones_to_smartschedule = AsyncMock(return_value={"ok": True})
+            _switch_zones_persistant_off = AsyncMock(return_value={"ok": True})
+
+        mock_api.cloud_api = FakeCloudApi()
+
+        response = client.post("/zones/set?heating_enabled=false&persistant=true")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["handling"] == "cloud_call"
+        assert data["applied"]["heating_enabled"] is False
+
+        mock_api.set_device_characteristics.assert_not_called()
+        mock_api.cloud_api._switch_zones_persistant_off.assert_called_once_with([100, 101, 102, 103])
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_not_called()
+
+    def test_set_all_zones_requires_heating_enabled(self, client, mock_api):
+        """Bulk all-zones endpoint requires heating_enabled."""
+        response = client.post("/zones/set")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "At heating mode should be given"
         mock_api.set_device_characteristics.assert_not_called()
 
 class TestSetDeviceBridgeCommands:
@@ -1736,6 +2180,9 @@ class TestBridgeCommandValidation:
         assert response.status_code == 400
         # Bridge should NOT have been called
         mock_api.set_device_characteristics.assert_not_called()
+        data = response.json()
+        assert data["detail"] == "Temperature must be -1 (resume), 0 (off), or between 5 and 30°C"
+
 
     def test_set_zone_no_parameters_no_bridge_call(self, client, mock_api):
         """Test that missing parameters prevent bridge call."""
@@ -1744,6 +2191,8 @@ class TestBridgeCommandValidation:
         assert response.status_code == 400
         # Bridge should NOT have been called
         mock_api.set_device_characteristics.assert_not_called()
+        data = response.json()
+        assert data["detail"] == "At least the temp or heating mode should be given"
 
     def test_set_zone_nonexistent_zone_no_bridge_call(self, client, mock_api):
         """Test that nonexistent zone prevents bridge call."""
@@ -2074,12 +2523,268 @@ class TestOpenWindowSettings:
         """Test that invalid window timeout values are rejected."""
         response = client.post("/zones/1/windowtimeouts?window_open_time=-10&window_rest_time=200")
         assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "window_open_time must be between 1 and 480 minutes, or -1 to reset to default"
 
         response = client.post("/zones/1/windowtimeouts?window_open_time=100&window_rest_time=-20")
         assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "window_rest_time must be between 1 and 480 minutes, or -1 to reset to default"
 
         response = client.post("/zones/1/windowtimeouts?window_open_time=abc&window_rest_time=200")
         assert response.status_code == 422
+        data = response.json()
+        assert data["detail"][0]["msg"] == "Input should be a valid integer, unable to parse string as an integer"
 
         response = client.post("/zones/1/windowtimeouts?window_open_time=100&window_rest_time=xyz")
         assert response.status_code == 422
+        data = response.json()
+        assert data["detail"][0]["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+
+class TestPurgeHistoryInfo:
+    """Test suite for GET /purgehistory/info endpoint."""
+
+    @pytest.fixture
+    def purgehistory_info_setup(self):
+        mock_state_manager = Mock()
+        mock_state_manager.get_device_history_status_info.return_value = {
+            "total_records": 5,
+            "oldest_record": "2026-03-01T00:00:00",
+            "database_size": 12345,
+            "purge_history_days": 14,
+        }
+
+        mock_tado_api = SimpleNamespace(
+            state_manager=mock_state_manager,
+            cloud_api=SimpleNamespace(purge_history_days=14),
+        )
+
+        app = create_app()
+        register_routes(app, lambda: mock_tado_api)
+
+        client = TestClient(app)
+        return client, mock_tado_api, mock_state_manager
+
+    @pytest.fixture
+    def purgehistory_info_db_setup(self, test_db):
+        """Setup using real database, routes and DeviceStateManager."""
+        from tado_local.routes import create_app, register_routes
+        from tado_local.state import DeviceStateManager
+
+        state_manager = DeviceStateManager(test_db)
+
+        mock_tado_api = SimpleNamespace(
+            state_manager=state_manager,
+            cloud_api=SimpleNamespace(purge_history_days=14),
+            pairing=None,
+        )
+
+        app = create_app()
+        register_routes(app, lambda: mock_tado_api)
+
+        client = TestClient(app)
+        return client, mock_tado_api, state_manager
+
+    def test_get_purge_history_info_returns_correct_structure(self, purgehistory_info_setup):
+        client, mock_tado_api, mock_state_manager = purgehistory_info_setup
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "total_records": 5,
+            "oldest_record": "2026-03-01T00:00:00",
+            "database_size": 12345,
+            "purge_history_days": 14,
+        }
+
+        mock_state_manager.get_device_history_status_info.assert_called_once_with(14)
+        assert mock_tado_api.cloud_api.purge_history_days == 14
+
+    def test_get_purge_history_info_passes_configured_purge_days(self, purgehistory_info_setup):
+        client, mock_tado_api, mock_state_manager = purgehistory_info_setup
+        mock_tado_api.cloud_api.purge_history_days = 30
+        mock_state_manager.get_device_history_status_info.return_value = {
+            "total_records": 10,
+            "oldest_record": "2026-02-01T00:00:00",
+            "database_size": 54321,
+            "purge_history_days": 30,
+        }
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        assert response.json()["purge_history_days"] == 30
+        mock_state_manager.get_device_history_status_info.assert_called_once_with(30)
+
+    def test_get_purge_history_info_db_returns_correct_structure(self, purgehistory_info_db_setup):
+        """Test GET /purgehistory/info returns correct structure using real database."""
+        client, mock_tado_api, state_manager = purgehistory_info_db_setup
+
+        conn = sqlite3.connect(state_manager.db_path)
+        expected_count = conn.execute("SELECT COUNT(*) FROM device_state_history").fetchone()[0]
+        conn.close()
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "history_record_count" in data
+        assert "oldest_record" in data
+        assert "database_file_size_bytes" in data
+        assert "database_file_size_mb" in data
+        assert "history_purge_setting" in data
+
+        assert isinstance(data["history_record_count"], int)
+        assert data["history_record_count"]  == expected_count
+        assert isinstance(data["database_file_size_bytes"], int)
+        assert data["database_file_size_bytes"] > 0
+        assert data["history_purge_setting"] == "14 days"
+
+
+    def test_get_purge_history_info_db_oldest_record_is_valid_datetime(self, purgehistory_info_db_setup):
+        """Test that oldest_record is a valid datetime string."""
+        from datetime import datetime
+        client, mock_tado_api, state_manager = purgehistory_info_db_setup
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        data = response.json()
+
+        oldest = data["oldest_record"]
+        assert oldest is not None
+        # Should be parseable as datetime
+        parsed = datetime.fromisoformat(oldest)
+        assert parsed is not None
+
+    def test_get_purge_history_info_db_passes_configured_purge_days(self, purgehistory_info_db_setup):
+        """Test that purge_history_days in response reflects the configured value."""
+        client, mock_tado_api, state_manager = purgehistory_info_db_setup
+        mock_tado_api.cloud_api.purge_history_days = 30
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["history_purge_setting"] == "30 days"
+
+    def test_get_purge_history_info_db_passes_never_purge_days(self, purgehistory_info_db_setup):
+        """Test that purge_history_days in response reflects the configured value."""
+        client, mock_tado_api, state_manager = purgehistory_info_db_setup
+        mock_tado_api.cloud_api.purge_history_days = None
+
+        response = client.get("/purgehistory/info")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["history_purge_setting"] == "never"
+
+
+class TestPurgeHistoryNow:
+    """Test suite for POST /purgehistory/now endpoint."""
+
+    @pytest.fixture
+    def purgehistory_now_setup(self, test_db):
+        from tado_local.routes import create_app, register_routes
+        from tado_local.state import DeviceStateManager
+
+        state_manager = DeviceStateManager(test_db)
+
+        mock_tado_api = SimpleNamespace(
+            state_manager=state_manager,
+            cloud_api=SimpleNamespace(purge_history_days=14),
+            pairing=None,
+        )
+
+        app = create_app()
+        register_routes(app, lambda: mock_tado_api)
+
+        client = TestClient(app)
+        return client, mock_tado_api, state_manager
+
+    def test_post_purge_history_now_purge_120_days(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+
+        response = client.post("/purgehistory/now?days=120")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["days"] == 120
+        assert "deleted_rows" in data
+        assert "remaining_rows" in data
+        assert "cutoff" in data
+        assert "-120 days" in data["cutoff"]
+
+    def test_post_purge_history_now_uses_configured_days_when_no_param(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+
+        response = client.post("/purgehistory/now")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["days"] == 14  # uses purge_history_days from cloud_api config
+
+    def test_post_purge_history_now_deletes_old_records(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+
+        # Insert an old record that should be purged (updated_at far in the past)
+        conn = sqlite3.connect(state_manager.db_path)
+        conn.execute(
+            "INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, updated_at) "
+            "VALUES (1, '20200101000000', 20.0, '2020-01-01 00:00:00')"
+        )
+        total_before = conn.execute("SELECT COUNT(*) FROM device_state_history").fetchone()[0]
+        conn.commit()
+        conn.close()
+
+        response = client.post("/purgehistory/now?days=8")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["deleted_rows"] >= 1
+        assert data["remaining_rows"] == total_before - data["deleted_rows"]
+
+    def test_post_purge_history_now_deletes_based_on_commandline(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+
+        # Insert an old record that should be purged (updated_at far in the past)
+        conn = sqlite3.connect(state_manager.db_path)
+        conn.execute(
+            "INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, updated_at) "
+            "VALUES (1, '20200101000000', 20.0, '2020-01-01 00:00:00')"
+        )
+        total_before = conn.execute("SELECT COUNT(*) FROM device_state_history").fetchone()[0]
+        conn.commit()
+        conn.close()
+
+        response = client.post("/purgehistory/now")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["deleted_rows"] >= 1
+        assert data["remaining_rows"] == total_before - data["deleted_rows"]
+
+    def test_post_purge_history_now_minimal_days_seven(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+        response = client.post("/purgehistory/now?days=1")
+
+        assert response.status_code == 400
+        data = response.json()
+        assert data["detail"] == "Days must be greater than or equal to 7"
+
+    def test_post_purge_history_now_uses_deafauly_days_when_no_param(self, purgehistory_now_setup):
+        client, mock_tado_api, state_manager = purgehistory_now_setup
+        mock_tado_api.cloud_api.purge_history_days = None
+
+        response = client.post("/purgehistory/now")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["days"] == 365  # uses purge_history_days default of 365 when not set in config

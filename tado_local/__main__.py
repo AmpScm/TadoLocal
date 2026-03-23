@@ -97,7 +97,7 @@ async def run_server(args):
         tado_api = TadoLocalAPI(str(db_path))
 
         # Initialize Tado Cloud API (always enabled)
-        cloud_api = TadoCloudAPI(str(db_path), tado_api=tado_api)
+        cloud_api = TadoCloudAPI(str(db_path), tado_api=tado_api, purge_history_days=args.purgehistory)
 
         # Check if already authenticated
         if not cloud_api.is_authenticated():
@@ -404,6 +404,9 @@ Examples:
   # Reconnect to a previously paired standalone accessory (no PIN needed)
   tado-local --bridge-ip 192.168.1.100 --accessory-ip 192.168.1.101
 
+  # Keep database clean by clearing device history after 30 days
+  tado-local --bridge-ip 192.168.1.100 --accessory-ip 192.168.1.101 --purgehistory 30
+
 API Endpoints:
   GET  /               - API information
   GET  /status         - System status
@@ -463,6 +466,10 @@ API Endpoints:
     parser.add_argument(
             "--accessory-pin", action="append", default=[],
             help="HomeKit PIN for a standalone accessory (repeatable, order must match --accessory-ip)"
+        )
+    parser.add_argument(
+            "--purgehistory", type=int,
+            help="Automatically delete device history records older than specified number of days (e.g., 30)"
         )
     # Parse CLI arguments
     args = parser.parse_args()
@@ -538,6 +545,12 @@ API Endpoints:
             logger.info(f"PID file written: {pid_path}")
         except Exception as e:
             logger.error(f"Failed to write PID file: {e}")
+            exit(1)
+
+    # Check that --purgehistory value is valid if provided
+    if args.purgehistory is not None:
+        if args.purgehistory < 7:
+            logger.error("Invalid value for --purgehistory: must be a non-negative integer and at least 7 days")
             exit(1)
 
     # Run with proper error handling

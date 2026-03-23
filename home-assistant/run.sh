@@ -1,7 +1,9 @@
 #!/usr/bin/with-contenv bashio
-echo "Tado-local server starting.."
+echo "Tado-local server starting..."
 CONFIG_PSTH=/data/options.json
 ARGS=""
+PRIVATE_DB_PATH=/data/tado-local.db
+PUBLIC_DB_PATH=/homeassistant_config/.storage/tado-local.db
 
 # Get the variables from HA
 BRIDGE_IP="$(bashio::config 'bridge_ip')"
@@ -21,17 +23,26 @@ fi
 # Determine where to store the database based on the keep_db_private option
 LOCAL_DB="$(bashio::config 'keep_db_private')"
 if [ "$LOCAL_DB" = true ]; then
-    echo "INFO: keep_db_private is true, using /data/tado-local.db (not accessible outside the container)"
-    ARGS="${ARGS} --state /data/tado-local.db"
+    echo "INFO: keep_db_private is true, using ${PRIVATE_DB_PATH} (not accessible outside the container)"
+    ARGS="${ARGS} --state ${PRIVATE_DB_PATH}"
 else
-    echo "INFO: keep_db_private is false, using /homeassistant_config/.storage/tado-local.db (accessible outside the container)"
-    ARGS="${ARGS} --state /homeassistant_config/.storage/tado-local.db"
-    if [ -f "/data/tado-local.db" ]; then
+    echo "INFO: keep_db_private is false, using ${PUBLIC_DB_PATH} (accessible outside the container)"
+    ARGS="${ARGS} --state ${PUBLIC_DB_PATH}"
+    if [ -f "${PRIVATE_DB_PATH}" ] && [ ! -f "${PUBLIC_DB_PATH}" ]; then
         # Forward compatibility: if the old database location exists, move it to the new location and use it.
-        echo "*** WARNING: DB found at /data/tado-local.db. move to new location and use it. ***"
-        echo "--- mv /data/tado-local.db /homeassistant_config/.storage/tado-local.db"
-        mv /data/tado-local.db /homeassistant_config/.storage/tado-local.db
+        echo "*** WARNING: DB found at ${PRIVATE_DB_PATH}. move to new location and use it. ***"
+        echo "--- mv ${PRIVATE_DB_PATH} ${PUBLIC_DB_PATH}"
+        mv $PRIVATE_DB_PATH $PUBLIC_DB_PATH
     fi
+fi
+
+# Check if purge_history is set and add it to the arguments
+PURGE_DAYS="$(bashio::config 'purge_history')"
+if [ -n "$PURGE_DAYS" ] && [[ "$PURGE_DAYS" =~ ^[0-9]+$ ]] && [ "$PURGE_DAYS" -ne 0 ]; then
+    echo "INFO: purge history after ${PURGE_DAYS} days"
+    ARGS="${ARGS} --purgehistory ${PURGE_DAYS}"
+elif [ -n "$PURGE_DAYS" ] && ! [[ "$PURGE_DAYS" =~ ^[0-9]+$ ]]; then
+    echo "WARNING: Invalid purge_history value '${PURGE_DAYS}'. It must be a non-negative integer. Ignoring purge_history setting."
 fi
 
 # Get the number of accessories configured in HA

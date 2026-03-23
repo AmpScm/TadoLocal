@@ -18,6 +18,7 @@
 
 import datetime
 import logging
+import os
 import sqlite3
 import time
 from typing import Dict, List, Any, Optional
@@ -123,17 +124,18 @@ class DeviceStateManager:
                    d.serial_number as leader_serial, d.device_type as leader_type,
                    z.tado_zone_id,
                    d.is_circuit_driver, z.uuid,
-                   z.window_open_time, z.window_rest_time
+                   z.window_open_time, z.window_rest_time, z.zone_type
             FROM zones z
             LEFT JOIN devices d ON z.leader_device_id = d.device_id
             ORDER BY z.order_id, z.name
         """)
 
         for zone_id, name, leader_device_id, order_id, leader_serial, leader_type, tado_zone_id, is_circuit_driver, \
-                uuid_val, window_open_time, window_rest_time in cursor.fetchall():
+                uuid_val, window_open_time, window_rest_time, zone_type in cursor.fetchall():
             self.zone_cache[zone_id] = {
                 'zone_id': zone_id,
                 'name': name,
+                'zone_type': zone_type,
                 'leader_device_id': leader_device_id,
                 'order_id': order_id,
                 'tado_zone_id': tado_zone_id,
@@ -211,6 +213,53 @@ class DeviceStateManager:
 
     def get_or_create_device(self, serial_number: str, aid: int, accessory_data: dict) -> int:
         """Get or create device ID for a serial number, updating aid if needed."""
+        # Extract device info from accessory data
+        device_type = "unknown"
+        name = None
+        model = None
+        manufacturer = None
+
+        for service in accessory_data.get('services', []):
+            # AccessoryInformation service
+            if service.get('type').lower() == '0000003e-0000-1000-8000-0026bb765291':
+                for char in service.get('characteristics', []):
+                    char_type = char.get('type', '').lower()
+                    value = char.get('value')
+                    if char_type == '00000023-0000-1000-8000-0026bb765291':  # Name
+                        name = value
+                    elif char_type == '00000021-0000-1000-8000-0026bb765291':  # Model
+                        model = value
+                    elif char_type == '00000020-0000-1000-8000-0026bb765291':  # Manufacturer
+                        manufacturer = value
+
+            # Determine device type from services
+            service_type = service.get('type', '').lower()
+            if service_type == '0000004a-0000-1000-8000-0026bb765291':
+                if model in ("SU02", "AC02"):
+                    device_type = "smart_ac_control"
+                else:
+                    device_type = "thermostat"
+            elif service_type == '0000008a-0000-1000-8000-0026bb765291':
+                device_type = "temperature_sensor"
+            elif service_type == '00000082-0000-1000-8000-0026bb765291':
+                device_type = "humidity_sensor"
+
+        # If device type still unknown, detect from serial number prefix
+        # Based on Tado Cloud API device types: IB01, RU02, VA02, etc.
+        if device_type == "unknown" and serial_number:
+            prefix = serial_number[:2].upper()
+            if prefix == "IB":
+                device_type = "internet_bridge"
+            elif prefix == "RU":
+                device_type = "thermostat"  # Room Unit / Smart Thermostat
+            elif prefix == "VA":
+                device_type = "radiator_valve"  # Smart Radiator Thermostat
+            elif prefix == "WR":
+                device_type = "wireless_receiver"  # Extension Kit
+            elif prefix == "SU":
+                device_type = "smart_ac_control"  # Smart AC Control V3+
+
+        # Existing device with same serial number Update data if needed
         if serial_number in self.device_id_cache:
             device_id = self.device_id_cache[serial_number]
 
@@ -233,50 +282,25 @@ class DeviceStateManager:
                 if device_info:
                     device_info['aid'] = aid
 
+            # Update name and device type if they are different HomeKit discovery more accurate so leading.
+            if device_info and (device_info.get('name') != name or device_info.get('device_type') != device_type):
+                logger.info(f"Updating device info for {device_id} ({serial_number}): "
+                            f"name {device_info.get('name')} -> {name}, "
+                            f"type {device_info.get('device_type')} -> {device_type} "
+                            f"model={model} manufacturer={manufacturer}")
+                conn = sqlite3.connect(self.db_path)
+                conn.execute("""
+                    UPDATE devices SET name = ?, device_type = ?, model = ?, manufacturer = ? WHERE device_id = ?
+                """, (name, device_type, model, manufacturer, device_id))
+                conn.commit()
+                conn.close()
+
+                # Update cache
+                if device_info:
+                    device_info['name'] = name
+                    device_info['device_type'] = device_type
+
             return device_id
-
-        # Extract device info from accessory data
-        device_type = "unknown"
-        name = None
-        model = None
-        manufacturer = None
-
-        for service in accessory_data.get('services', []):
-            # AccessoryInformation service
-            if service.get('type') == '0000003e-0000-1000-8000-0026bb765291':
-                for char in service.get('characteristics', []):
-                    char_type = char.get('type', '').lower()
-                    value = char.get('value')
-                    if char_type == '00000023-0000-1000-8000-0026bb765291':  # Name
-                        name = value
-                    elif char_type == '00000021-0000-1000-8000-0026bb765291':  # Model
-                        model = value
-                    elif char_type == '00000020-0000-1000-8000-0026bb765291':  # Manufacturer
-                        manufacturer = value
-
-            # Determine device type from services
-            service_type = service.get('type', '').lower()
-            if service_type == '0000004a-0000-1000-8000-0026bb765291':
-                device_type = "thermostat"
-            elif service_type == '0000008a-0000-1000-8000-0026bb765291':
-                device_type = "temperature_sensor"
-            elif service_type == '00000082-0000-1000-8000-0026bb765291':
-                device_type = "humidity_sensor"
-
-        # If device type still unknown, detect from serial number prefix
-        # Based on Tado Cloud API device types: IB01, RU02, VA02, etc.
-        if device_type == "unknown" and serial_number:
-            prefix = serial_number[:2].upper()
-            if prefix == "IB":
-                device_type = "internet_bridge"
-            elif prefix == "RU":
-                device_type = "thermostat"  # Room Unit / Smart Thermostat
-            elif prefix == "VA":
-                device_type = "radiator_valve"  # Smart Radiator Thermostat
-            elif prefix == "WR":
-                device_type = "wireless_receiver"  # Extension Kit
-            elif prefix == "SU":
-                device_type = "smart_ac_control"  # Smart AC Control V3+
 
         # Create device entry
         conn = sqlite3.connect(self.db_path)
@@ -674,3 +698,131 @@ class DeviceStateManager:
 
             self._save_to_history(device_id, time.time())
             logger.info(f"Device {device_id} window status updated: {old_status} -> {window_open}")
+
+    def get_last_active_heating_mode(self, device_id: int) -> int:
+        """
+        Get the last known active heating mode (target_heating_cooling_state) for a device.
+
+        Queries the device state history to retrieve the most recent non-zero and non-NULL
+        target_heating_cooling_state value (i.e., HEAT or COOL, not OFF). This is useful
+        for resuming a device's heating/cooling mode when switching from OFF mode back to ON.
+
+        Args:
+            device_id: The device ID to look up
+
+        Returns:
+            int: The last active heating mode (1=HEAT, 2=COOL), defaults to 1 (HEAT)
+                 if no non-zero mode found in history or device not found
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute("""
+            SELECT target_heating_cooling_state
+            FROM device_state_history
+            WHERE device_id = ? AND target_heating_cooling_state IS NOT NULL AND target_heating_cooling_state != 0
+            ORDER BY timestamp_bucket DESC
+            LIMIT 1
+        """, (device_id,))
+
+        row = cursor.fetchone()
+        conn.close()
+
+        if row and row[0] is not None:
+            last_mode = row[0]
+            logger.debug(f"Device {device_id}: Last active heating mode from history: {last_mode}")
+            return int(last_mode)
+
+        logger.debug(f"Device {device_id}: No active heating mode history found, defaulting to HEAT (1)")
+        return 1
+
+    def purge_device_history(self, days: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Purge old device history records from the database.
+
+        Args:
+            days: Keep history newer than this many days. If omitted, defaults to 365. (minimal 7 days)
+
+        Returns:
+            Summary dict with purge statistics.
+        """
+        if days is None:
+            days = 365  # Default to keeping 1 year of history
+
+        conn = sqlite3.connect(self.db_path)
+
+        modifier = f"-{days} days"
+        count_cursor = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM device_state_history
+            WHERE updated_at < datetime('now', ?)
+            """,
+            (modifier,)
+        )
+        rows_to_delete = count_cursor.fetchone()[0]
+
+        conn.execute(
+            """
+            DELETE FROM device_state_history
+            WHERE updated_at < datetime('now', ?)
+            """,
+            (modifier,)
+        )
+
+        remaining_cursor = conn.execute("SELECT COUNT(*) FROM device_state_history")
+        remaining_rows = remaining_cursor.fetchone()[0]
+
+        conn.commit()
+        conn.close()
+
+        logger.info(
+            "Purged %s device history rows older than %s; %s rows remain",
+            rows_to_delete,
+            modifier,
+            remaining_rows
+        )
+
+        return {
+            'success': True,
+            'days': days,
+            'deleted_rows': rows_to_delete,
+            'remaining_rows': remaining_rows,
+            'cutoff': modifier,
+        }
+
+    def get_device_history_status_info(self, days: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get overall status information for stored device history.
+
+        Returns:
+            Summary dict including history record counts, age bounds, device coverage,
+            and database file size information.
+        """
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.execute(
+            """
+            SELECT
+                COUNT(*) AS record_count,
+                MIN(updated_at) AS oldest_record
+            FROM device_state_history
+            """
+        )
+        row = cursor.fetchone()
+        conn.close()
+
+        file_size_bytes = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+        file_size_mb = round(file_size_bytes / (1024 * 1024), 3)
+
+        if days is not None:
+            history_purge = f"{days} days"
+        else:
+            history_purge = "never"
+
+        return {
+            'success': True,
+            'database_path': self.db_path,
+            'database_file_size_bytes': file_size_bytes,
+            'database_file_size_mb': file_size_mb,
+            'history_record_count': row[0] if row and row[0] is not None else 0,
+            'oldest_record': row[1] if row else None,
+            'history_purge_setting': history_purge,
+        }

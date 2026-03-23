@@ -196,10 +196,10 @@ class TadoLocalAPI:
 
             for service in a.get('services', []):
                 # AccessoryInformation service UUID
-                if service.get('type') == '0000003E-0000-1000-8000-0026BB765291':
+                if service.get('type').upper() == '0000003E-0000-1000-8000-0026BB765291':
                     for char in service.get('characteristics', []):
                         # SerialNumber characteristic UUID
-                        if char.get('type') == '00000030-0000-1000-8000-0026BB765291':
+                        if char.get('type').upper() == '00000030-0000-1000-8000-0026BB765291':
                             serial_number = char.get('value')
                             break
                 if serial_number:
@@ -295,7 +295,7 @@ class TadoLocalAPI:
         for pairing_id, items in by_pairing.items():
             pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
             for i in range(0, len(items), batch_size):
-                batch = items[i : i + batch_size]
+                batch = items[i: i + batch_size]
                 char_keys = [(aid, iid) for aid, iid, _, _ in batch]
 
                 try:
@@ -931,7 +931,7 @@ class TadoLocalAPI:
         for pairing_id, items in by_pairing.items():
             pairing = self.aid_to_pairing.get(items[0][0], self.pairing)
             for i in range(0, len(items), batch_size):
-                batch = items[i : i + batch_size]
+                batch = items[i: i + batch_size]
 
                 try:
                     results = await pairing.get_characteristics(batch)

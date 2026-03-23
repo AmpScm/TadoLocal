@@ -179,7 +179,7 @@ class TestSyncZones:
         assert device is not None
         assert device[0] == "RU001"
         assert device[1] == "dev"
-        assert device[2] == "THERMOSTAT"
+        assert device[2] == "unknown" # should NOT be updated from "unknown"
         assert leader is not None
         assert leader[0] is not None
 

@@ -67,6 +67,33 @@ class TestTadoLocalAPI:
             assert api_instance.is_initializing is False
 
     @pytest.mark.asyncio
+    async def test_initialize_with_extra_pairings(self, api_instance, mock_pairing):
+        """Test that extra pairings are handled during initialization."""
+        extra_pairings = AsyncMock()
+        extra_pairings.list_accessories_and_characteristics = AsyncMock(return_value=[])
+        extra_pairings.subscribe = AsyncMock()
+        extra_pairings.unsubscribe = AsyncMock()
+        extra_pairings.get_characteristics = AsyncMock(return_value={})
+        extra_pairings.put_characteristics = AsyncMock(return_value={})
+        extra_pairings.dispatcher_connect = Mock()
+
+        with (
+            patch.object(api_instance, 'refresh_accessories', new_callable=AsyncMock) as mock_refresh,
+            patch.object(api_instance, 'initialize_device_states', new_callable=AsyncMock) as mock_init_states,
+            patch.object(api_instance, 'setup_event_listeners', new_callable=AsyncMock) as mock_setup,
+        ):
+
+            await api_instance.initialize(mock_pairing, extra_pairings=extra_pairings)
+
+            # Should still initialize with the main pairing
+            assert api_instance.pairing == mock_pairing
+            assert api_instance.extra_pairings == extra_pairings
+            mock_refresh.assert_called_once()
+            mock_init_states.assert_called_once()
+            mock_setup.assert_called_once()
+
+
+    @pytest.mark.asyncio
     async def test_cleanup(self, api_instance, mock_pairing):
         """Test cleanup properly shuts down resources."""
         api_instance.pairing = mock_pairing
@@ -199,6 +226,53 @@ class TestTadoLocalAPIRefreshAccessories:
             assert api_instance.last_update is not None
             assert len(api_instance.accessories_cache) > 0
             mock_pairing.list_accessories_and_characteristics.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_refresh_accessories_with_extra_pairing_success(self, api_instance, mock_pairing):
+        """Test successful accessories refresh."""
+        mock_accessories = [
+            {
+                'aid': 1,
+                'services': [
+                    {
+                        'type': '0000003E-0000-1000-8000-0026BB765291',
+                        'characteristics': [{'type': '00000030-0000-1000-8000-0026BB765291', 'value': 'SN12345'}],
+                    }
+                ],
+            }
+        ]
+        mock_accessories_extra = [
+            {
+                'aid': 1,
+                'services': [
+                    {
+                        'type': '0000003E-0000-1000-8000-0026BB765291',
+                        'characteristics': [{'type': '00000030-0000-1000-8000-0026BB765291', 'value': 'SN98765'}],
+                    }
+                ],
+            }
+        ]
+
+        api_instance.pairing = mock_pairing
+        mock_pairing.list_accessories_and_characteristics.return_value = mock_accessories
+
+        extra_pairings = AsyncMock()
+        extra_pairings.list_accessories_and_characteristics = AsyncMock(return_value=[])
+        extra_pairings.subscribe = AsyncMock()
+        extra_pairings.unsubscribe = AsyncMock()
+        extra_pairings.get_characteristics = AsyncMock(return_value={})
+        extra_pairings.put_characteristics = AsyncMock(return_value={})
+        extra_pairings.dispatcher_connect = Mock()
+        extra_pairings.list_accessories_and_characteristics.return_value = mock_accessories_extra
+        api_instance.extra_pairings = [extra_pairings]
+
+        with patch.object(api_instance, '_process_raw_accessories', return_value={'device1': {'aid': 1}}):
+            await api_instance.refresh_accessories()
+
+            assert api_instance.last_update is not None
+            assert len(api_instance.accessories_cache) > 0
+            mock_pairing.list_accessories_and_characteristics.assert_called_once()
+            extra_pairings.list_accessories_and_characteristics.assert_called_once()
 
 
 class TestTadoLocalAPIDeviceStates:

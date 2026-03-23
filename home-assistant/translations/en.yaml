@@ -19,6 +19,10 @@ configuration:
     description: "Store the TadoLocal database in the add-on data folder (/data) instead of placing it in the Home Assistant configuration folder (/config/.storage).
 By placing it in /config/.storage, it becomes accessible or editable via Home Assistant."
 
+  purge_history:
+    name: "Purge history after (days)"
+    description: "Automatically purge device state history records older than the specified number of days. Set to 0 to disable automatic purging."
+    
   accessories:
     name: "Accessories"
     description: "List of Tado accessories to pair. (Like Smart AC Control)"

@@ -19,6 +19,10 @@ configuration:
     description: "Bewaar de TadoLocal database in de datafolder (/data) van de add-on in plaats van deze in de Home Assistant-configuratiemap (/config/.storage) te plaatsen.
     Door de /config/.storage te plaatsen is deze te benaderen of bewerken via HA."
 
+  purge_history:
+    name: "Geschiedenis automatisch opschonen na (dagen)"
+    description: "Automatisch geschiedenisrecords van apparaatstatussen ouder dan het opgegeven aantal dagen opschonen. Stel in op 0 om automatisch opschonen uit te schakelen."
+    
   accessories:
     name: "Accessoires"
     description: "Lijst met Tado-accessoires die gepaired moeten worden. (Zoals Smart AC Control)"
