@@ -6,7 +6,7 @@ and this project adheres to Semantic Versioning.
 
 ---
 
-## [1.1.2] – 2026-03-xx
+## [1.1.2] – 2026-04-07
 ### Added
 - Persistent HVAC mode support, the ability to toggle Smart Schedule for heating/cooling (this will trigger an API call). (#43)
 - Full Smart AC Control support.
