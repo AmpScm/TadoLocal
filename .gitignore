@@ -57,3 +57,4 @@ cover/
 tests/*.db
 *.db
 .pytest_cache/
+*.zip

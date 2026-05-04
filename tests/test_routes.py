@@ -27,12 +27,14 @@ def test_db():
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (101, 1, 'Bedroom', 'HOT_WATER', 2, 2, 10, 25)")
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (102, 1, 'Kitchen', 'HEATING', NULL, 3, 20, 30)")
     cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id, window_open_time, window_rest_time) VALUES (103, 1, 'Office', 'AIR_CONDITIONING', 5, 4, 20, 30)")
+    cursor.execute("INSERT INTO zones (tado_zone_id, tado_home_id, name, zone_type, leader_device_id, order_id) VALUES (104, 1, 'Attick', 'HEATING', 6, 5)")
 
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN001', 1, 1, 100, 'thermostat', 'Living Room Thermostat', 'RU01', 'Tado', '1.45', 'NORMAL', 1, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN002', 2, 2, 101, 'bridge', 'Bedroom Bridge', 'RU01', 'Tado', '1.45', 'NORMAL', 1, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN003', 3, 3, 102, 'thermostat', 'Kitchen Thermostat', 'RB01', 'Tado', '2.10', 'LOW', 0, 1)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN004', 4, 1, 100, 'radiator_thermostat', 'Living Room Radiator', 'RV01', 'Tado', '1.20', 'LOW', 0, 0)")
     cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN005', 5, 4, 100, 'smart_ac_control', 'Smart AC Control WR12345678', 'AC02', 'Tado', '118.8', NULL, 1, 0)")
+    cursor.execute("INSERT INTO devices (serial_number, aid, zone_id, tado_zone_id, device_type, name, model, manufacturer, firmware_version, battery_state, is_zone_leader, is_circuit_driver) VALUES ('SN006', 1, 1, 103, 'thermostat', 'Attick Thermostat', 'RU01', 'Tado', '1.45', 'NORMAL', 1, 1)")
 
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (1, '20260129100000', 21.5, 20.0, 1, 1, 45, 100, 1)")
     cursor.execute("INSERT INTO device_state_history (device_id, timestamp_bucket, current_temperature, target_temperature, current_heating_cooling_state, target_heating_cooling_state, humidity, battery_level, window) VALUES (2, '20260129100500', 19.0, 18.0, 1, 1, 50, 95, 0)")
@@ -430,7 +432,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zones" in data
-        assert len(data["zones"]) == 4
+        assert len(data["zones"]) == 5
 
     def test_get_zones_includes_zone_metadata(self, client, state_manager):
         """Test that zone data includes required metadata."""
@@ -464,6 +466,8 @@ class TestGetZones:
         assert zones[2]["order_id"] == 3
         assert zones[3]["name"] == "Office"
         assert zones[3]["order_id"] == 4
+        assert zones[4]["name"] == "Attick"
+        assert zones[4]["order_id"] == 5
         assert zones[2]["home_id"] is None
         assert zones[2]['window_open_time'] == 20
         assert zones[2]['window_rest_time'] == 30
@@ -738,7 +742,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zone_id" in data
-        assert data["zone_id"] == 5
+        assert data["zone_id"] == 6
         assert "name" in data
         assert data["name"] == "Bathroom"
 
@@ -782,7 +786,7 @@ class TestGetZones:
         assert response.status_code == 200
         data = response.json()
         assert "zone_id" in data
-        assert data["zone_id"] == 5
+        assert data["zone_id"] == 6
         assert "name" in data
         assert data["name"] == "Bathroom"
 
@@ -1050,8 +1054,8 @@ class TestGetDevices:
         assert response.status_code == 200
         data = response.json()
         assert "devices" in data
-        assert len(data["devices"]) == 5
-        assert data["count"] == 5
+        assert len(data["devices"]) == 6
+        assert data["count"] == 6
 
     def test_get_devices_includes_device_metadata(self, client, state_manager):
         """Test that device data includes required metadata."""
@@ -1866,23 +1870,23 @@ class TestSetAllZonesBridgeCommands:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["count"] == 4
+        assert data["count"] == 5
         assert data["handling"] == "local_handling"
         assert data["applied"]["heating_enabled"] is True
 
-        assert mock_api.set_device_characteristics.await_count == 4
+        assert mock_api.set_device_characteristics.await_count == 5
         called_device_ids = [call.args[0] for call in mock_api.set_device_characteristics.await_args_list]
-        assert called_device_ids == [1, 2, 3, 5]
+        assert called_device_ids == [1, 2, 3, 5, 6]
 
         assert data["error_count"] == 0
         assert data["errors"] == []
 
-        assert len(data["zones"]) == 4
+        assert len(data["zones"]) == 5
         assert data["zones"][0]["mode"] == "HEAT"
         assert data["zones"][1]["mode"] == "HEAT"
         assert data["zones"][2]["mode"] == "HEAT"
         assert data["zones"][3]["mode"] == "COOL"
-
+        assert data["zones"][4]["mode"] == "HEAT"
 
     def test_set_all_zones_persistant_true_uses_single_cloud_call(self, client, mock_api):
         """Bulk persistent all-zones control should use one cloud API call."""
@@ -1901,13 +1905,13 @@ class TestSetAllZonesBridgeCommands:
         assert response.status_code == 200
         data = response.json()
         assert data["success"] is True
-        assert data["count"] == 4
+        assert data["count"] == 5
         assert data["handling"] == "cloud_call"
         assert data["applied"]["target_temperature"] is None
         assert data["applied"]["heating_enabled"] is True
 
         mock_api.set_device_characteristics.assert_not_called()
-        mock_api.cloud_api._switch_zones_to_smartschedule.assert_called_once_with([100, 101, 102, 103])
+        mock_api.cloud_api._switch_zones_to_smartschedule.assert_called_once_with([100, 101, 102, 103, 104])
         mock_api.cloud_api._switch_zones_persistant_off.assert_not_called()
 
     def test_set_all_zones_persistant_false_uses_single_cloud_call(self, client, mock_api):
@@ -1930,7 +1934,7 @@ class TestSetAllZonesBridgeCommands:
         assert data["applied"]["heating_enabled"] is False
 
         mock_api.set_device_characteristics.assert_not_called()
-        mock_api.cloud_api._switch_zones_persistant_off.assert_called_once_with([100, 101, 102, 103])
+        mock_api.cloud_api._switch_zones_persistant_off.assert_called_once_with([100, 101, 102, 103, 104])
         mock_api.cloud_api._switch_zones_to_smartschedule.assert_not_called()
 
     def test_set_all_zones_requires_heating_enabled(self, client, mock_api):
@@ -2540,6 +2544,31 @@ class TestOpenWindowSettings:
         assert response.status_code == 422
         data = response.json()
         assert data["detail"][0]["msg"] == "Input should be a valid integer, unable to parse string as an integer"
+
+
+    def test_zone_get_set_window_rest_timeout_with_default_values(self, client, state_manager):
+        """Test that zone default open window timeouts settable."""
+
+        response = client.get("/zones/5")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "window_open_time" in data['zone']
+        assert data['zone']['window_open_time'] == 30   # Shall not be None as default value is set to 30 in db-schema
+        assert "window_rest_time" in data['zone']
+        assert data['zone']['window_rest_time'] == 15   # Shall not be None as default value is set to 15 in db-schema
+
+        response = client.post("/zones/5/windowtimeouts?window_rest_time=200&window_open_time=210")
+        assert response.status_code == 200
+
+        response = client.get("/zones/5")
+        assert response.status_code == 200
+        data = response.json()
+
+        assert "window_open_time" in data['zone']
+        assert data['zone']['window_open_time'] == 210
+        assert "window_rest_time" in data['zone']
+        assert data['zone']['window_rest_time'] == 200
 
 class TestPurgeHistoryInfo:
     """Test suite for GET /purgehistory/info endpoint."""
