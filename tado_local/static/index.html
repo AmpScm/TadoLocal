@@ -1008,7 +1008,7 @@
     let currentZone = null;
     let tempValue = 20;
     let modeValue = 'heat';
-    let eventSource = null;
+    let eventStream = null;
     let chartJsLoaded = false;
     let historyChart = null;
     let lastCloudAuthState = null;
@@ -1073,7 +1073,7 @@
                 const startTime = endTime - (hours * 3600);
                 
                 // Fetch history data
-                const response = await fetch(`/zones/${zoneId}/history?start_time=${startTime}&end_time=${endTime}&limit=1000`);
+                const response = await apiFetch(`/zones/${zoneId}/history?start_time=${startTime}&end_time=${endTime}&limit=1000`);
                 if (!response.ok) throw new Error('Failed to load history');
                 
                 const data = await response.json();
@@ -1318,10 +1318,35 @@
             }
         }
 
+        // fetch() with the given API key as a Bearer token
+        async function apiFetch(url, options = {}) {
+            const send = (key) => {
+                const headers = new Headers(options.headers);
+                if (key) headers.set('Authorization', `Bearer ${key}`);
+                return fetch(url, { ...options, headers });
+            };
+
+            const key = localStorage.getItem('apiKey');
+            const response = await send(key);
+            if (response.status !== 401) return response;
+
+            // Another request may have stored a new key while this one was in flight
+            let fresh = localStorage.getItem('apiKey');
+            if (fresh === key) {
+                fresh = window.prompt('API key')?.trim();
+                if (fresh) {
+                    localStorage.setItem('apiKey', fresh);
+                } else {
+                    localStorage.removeItem('apiKey');
+                }
+            }
+            return fresh ? send(fresh) : response;
+        }
+
         // Load zones
         async function loadZones() {
             try {
-                const response = await fetch('/zones');
+                const response = await apiFetch('/zones');
                 if (!response.ok) throw new Error('Failed to load zones');
                 
                 const data = await response.json();
@@ -1343,7 +1368,7 @@
         // Load status
         async function loadStatus() {
             try {
-                const response = await fetch('/status');
+                const response = await apiFetch('/status');
                 if (!response.ok) return;
                 
                 const data = await response.json();
@@ -1660,7 +1685,7 @@
             }
 
             try {
-                const response = await fetch(`/zones/${currentZone.zone_id}/set?${params}`, {
+                const response = await apiFetch(`/zones/${currentZone.zone_id}/set?${params}`, {
                     method: 'POST'
                 });
 
@@ -1686,7 +1711,7 @@
             params.append('persistant', 'true');
 
             try {
-                const response = await fetch(`/zones/set?${params}`, {
+                const response = await apiFetch(`/zones/set?${params}`, {
                     method: 'POST'
                 });
 
@@ -1722,47 +1747,72 @@
             }, 5000);
         }
 
+        // Apply one server-sent event to the zone list
+        function handleEvent(data) {
+            if (data.type === 'zone') {
+                // Update specific zone in our zones array
+                const zoneIndex = zones.findIndex(z => z.zone_id === data.zone_id);
+                if (zoneIndex !== -1) {
+                    zones[zoneIndex].state = data.state;
+                    // Re-render zones to show updated state
+                    renderZones();
+                }
+            } else if (data.type === 'keepalive') {
+                // Connection is alive
+                console.debug('SSE keepalive');
+            }
+        }
+
+        async function readEvents(signal) {
+            const response = await apiFetch('/events?types=zone', { signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            console.log('SSE connection established');
+
+            const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+            let buffer = '';
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) return;
+
+                buffer += value;
+                const frames = buffer.split(/\r?\n\r?\n/);
+                buffer = frames.pop();
+
+                for (const frame of frames) {
+                    const text = frame.split(/\r?\n/)
+                        .filter(line => line.startsWith('data:'))
+                        .map(line => line.slice(5).replace(/^ /, ''))
+                        .join('\n');
+                    if (!text) continue;
+
+                    try {
+                        handleEvent(JSON.parse(text));
+                    } catch (error) {
+                        console.error('Error parsing SSE data:', error);
+                    }
+                }
+            }
+        }
+
         // Setup Server-Sent Events for live updates
         function setupEventStream() {
             // Close existing connection if any
-            if (eventSource) {
-                eventSource.close();
+            if (eventStream) {
+                eventStream.abort();
             }
 
-            eventSource = new EventSource('/events?types=zone');
-            
-            eventSource.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'zone') {
-                        // Update specific zone in our zones array
-                        const zoneIndex = zones.findIndex(z => z.zone_id === data.zone_id);
-                        if (zoneIndex !== -1) {
-                            zones[zoneIndex].state = data.state;
-                            // Re-render zones to show updated state
-                            renderZones();
-                        }
-                    } else if (data.type === 'keepalive') {
-                        // Connection is alive
-                        console.debug('SSE keepalive');
-                    }
-                } catch (error) {
-                    console.error('Error parsing SSE data:', error);
-                }
-            };
+            const stream = new AbortController();
+            eventStream = stream;
 
-            eventSource.onerror = (error) => {
+            readEvents(stream.signal).catch((error) => {
+                if (stream.signal.aborted) return;
                 console.error('SSE connection error:', error);
-                eventSource.close();
-                
+            }).finally(() => {
+                if (stream.signal.aborted) return;
+
                 // Reconnect after 5 seconds
                 setTimeout(setupEventStream, 5000);
-            };
-
-            eventSource.onopen = () => {
-                console.log('SSE connection established');
-            };
+            });
         }
 
         // Theme toggle handlers
